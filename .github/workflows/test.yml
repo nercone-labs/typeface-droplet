@@ -46,6 +46,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools "ndk;${{ env.NDK_VERSION }}"
+          packages: platform-tools ndk;${{ env.NDK_VERSION }}
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew :app:testDebugUnitTest :app:assembleRelease --stacktrace

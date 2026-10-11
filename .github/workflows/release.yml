@@ -12,27 +12,52 @@ env:
   NDK_VERSION: 30.0.16248370
 
 jobs:
-  test:
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.commit.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Check that the tag matches the version
+      - name: Write the version of the tag into the sources
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          cargo_version="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml)"
-          gradle_version="$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts)"
-          echo "tag=$tag Cargo.toml=$cargo_version app=$gradle_version"
-          [ "$tag" = "$cargo_version" ] && [ "$tag" = "$gradle_version" ]
-      - run: cargo test --workspace --locked
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || { echo "::error::$GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH"; exit 1; }
+          code=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
+          sed -i "/^\[workspace.package\]/,/^\[/s/^version = \".*\"/version = \"$version\"/" Cargo.toml
+          sed -i "s/^\( *\)versionName = \".*\"/\1versionName = \"$version\"/; s/^\( *\)versionCode = .*/\1versionCode = $code/" app/build.gradle.kts
+          cargo update --workspace
+      - name: Commit the version and move the tag onto it
+        id: commit
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "Release $GITHUB_REF_NAME"
+            git push origin HEAD:main
+            git tag -f "$GITHUB_REF_NAME"
+            git push --force origin "refs/tags/$GITHUB_REF_NAME"
+          fi
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-  release:
-    needs: test
+  test:
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.version.outputs.commit }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+
+  release:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.commit }}
           lfs: true
       - uses: actions/setup-java@v4
         with:
@@ -44,11 +69,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools "ndk;${{ env.NDK_VERSION }}"
+          packages: platform-tools ndk;${{ env.NDK_VERSION }}
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew :app:testDebugUnitTest :app:assembleRelease --stacktrace
 
-      # Signed only when the repository has the signing secrets; otherwise the unsigned APK is published.
       - name: Sign the APK
         env:
           KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
