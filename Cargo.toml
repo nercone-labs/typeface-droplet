@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["crates/sfnt", "crates/fontxml", "crates/mount", "crates/android", "crates/droplet"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+authors = ["Nercone <nercone@nercone.dev>"]
+repository = "https://github.com/nercone-dev/typeface-droplet"
+
+[workspace.dependencies]
+sfnt = { path = "crates/sfnt" }
+fontxml = { path = "crates/fontxml" }
+mount = { path = "crates/mount" }
+android = { path = "crates/android" }
+quick-xml = "0.42"
+rustix = { version = "1.1", default-features = false, features = ["std", "fs", "mount", "thread", "process"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+lexopt = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

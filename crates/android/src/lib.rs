@@ -1,0 +1,19 @@
+//! Interfaces to the running Android system: system properties, the font service
+//! (`cmd font`), the package manager (`cmd package`, `dumpsys package`) and processes.
+//!
+//! Every system program is started directly, without a shell. Parsing of their output is
+//! separated from running them, so that it can be tested on any system.
+
+mod activity_manager;
+mod command;
+mod font_service;
+mod package_manager;
+mod process;
+mod property;
+
+pub use activity_manager::ActivityManager;
+pub use command::{CommandError, CommandOutput, SystemCommand};
+pub use font_service::FontService;
+pub use package_manager::{ComponentName, ComponentState, PackageManager};
+pub use process::{ProcessInfo, ProcessTable};
+pub use property::SystemProperty;

@@ -1,0 +1,8 @@
+# The bundled fonts are large binary files, kept in Git LFS.
+fonts/*.ttf filter=lfs diff=lfs merge=lfs -text
+fonts/*.otf filter=lfs diff=lfs merge=lfs -text
+fonts/*.ttc filter=lfs diff=lfs merge=lfs -text
+
+# The Gradle wrapper must keep Unix line endings to run.
+gradlew text eol=lf
+*.bat text eol=crlf

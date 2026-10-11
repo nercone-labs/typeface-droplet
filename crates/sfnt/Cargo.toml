@@ -1,0 +1,8 @@
+[package]
+name = "sfnt"
+description = "Reader and table rewriter for OpenType, TrueType and font collection (TTC) files"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]

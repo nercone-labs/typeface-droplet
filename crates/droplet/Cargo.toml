@@ -1,0 +1,23 @@
+[package]
+name = "droplet"
+description = "TypeFace Droplet engine: replaces Android system fonts at runtime, without a reboot"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "droplet"
+path = "src/main.rs"
+
+[dependencies]
+sfnt.workspace = true
+fontxml.workspace = true
+mount.workspace = true
+android.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+lexopt.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+rustix.workspace = true

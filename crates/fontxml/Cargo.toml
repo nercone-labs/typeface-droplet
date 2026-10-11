@@ -1,0 +1,9 @@
+[package]
+name = "fontxml"
+description = "Lossless reader and editor for Android font configuration XML (fonts.xml, font_fallback.xml, fonts_customization.xml)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+quick-xml.workspace = true

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A white hexagon holding "Tf" (solid T, outlined f), scaled into the 66 dp safe circle of the 108 dp adaptive icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="512"
+        android:pivotY="512"
+        android:scaleX="0.0714"
+        android:scaleY="0.0714"
+        android:translateX="-458"
+        android:translateY="-458">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M742.94,112 L973.88,512 L742.94,912 L281.06,912 L50.12,512 L281.06,112 Z" />
+        <path
+            android:fillColor="#FF57ADD9"
+            android:pathData="M297.77,392.91 L297.77,356 L545.18,356 L545.18,392.91 L442.57,392.91 L442.57,683.39 L400.82,683.39 L400.82,392.91 Z" />
+        <path
+            android:strokeColor="#FF57ADD9"
+            android:strokeWidth="8"
+            android:strokeLineJoin="miter"
+            android:pathData="M715.69,437.73 L715.69,471.57 L571.11,471.57 L571.11,437.73 Z M619.45,683.39 L619.45,405 C619.45,390.79 622.78,378.93 629.45,369.4 C636.11,359.88 644.79,352.7 655.49,347.87 C666.18,343.04 677.46,340.62 689.33,340.62 C698.7,340.62 706.47,341.39 712.62,342.93 C718.77,344.47 723.31,345.9 726.24,347.21 L715.25,381.05 C713.2,380.32 710.53,379.51 707.23,378.63 C703.93,377.75 699.5,377.31 693.94,377.31 C681.78,377.31 672.92,380.42 667.35,386.65 C661.78,392.88 659,401.92 659,413.79 L659,683.39 Z" />
+    </group>
+</vector>

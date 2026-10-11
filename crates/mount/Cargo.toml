@@ -1,0 +1,9 @@
+[package]
+name = "mount"
+description = "Linux mount namespaces, bind and tmpfs mounts, mountinfo parsing and SELinux file labels"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+rustix.workspace = true
