@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-use android::{ActivityManager, FontService, PackageManager, ProcessTable, SystemProperty};
+use android::{ActivityManager, Capability, FontService, PackageManager, ProcessCapabilities, ProcessTable, SystemProperty};
 use fontxml::{Document, Element};
 use mount::{Mount, MountNamespace, MountTable};
 use serde::Serialize;
@@ -86,11 +86,34 @@ impl Engine {
         return u32::MAX;
     }
 
+    /// The capabilities the engine uses. Running as uid 0 does not imply them: a root manager
+    /// can drop them (the "Restrict" policy of Magisk drops every one).
+    pub const CAPABILITIES: [Capability; 5] = [
+        // Copies in skeletons keep the owners of the originals.
+        Capability::CHOWN,
+        // Configurations and fonts are read from the private directory of the application.
+        Capability::DAC_READ_SEARCH,
+        // Processes of other users are restarted.
+        Capability::KILL,
+        // `/proc` is mounted with `hidepid`, and shows init only with it.
+        Capability::SYS_PTRACE,
+        // Mounts and mount namespaces.
+        Capability::SYS_ADMIN,
+    ];
+
+    /// Requires running as root (uid 0) with every capability in `Engine::CAPABILITIES`.
     pub fn require_root() -> Result<(), DropletError> {
-        if Engine::uid() == 0 { Ok(()) } else { Err(DropletError::Refused(format!("the engine must run as root (uid 0), not uid {}", Engine::uid()))) }
+        let uid = Engine::uid();
+        if uid != 0 {
+            return Err(DropletError::Refused(format!("the engine must run as root (uid 0), not uid {uid}")));
+        }
+        let capabilities = ProcessCapabilities::current().map_err(|error| DropletError::io("read the capabilities of the engine", error))?;
+        let missing: Vec<Capability> = Engine::CAPABILITIES.into_iter().filter(|capability| !capabilities.effective.contains(*capability)).collect();
+        if missing.is_empty() { Ok(()) } else { Err(DropletError::Restricted(missing)) }
     }
 
     pub fn enter_init_namespace() -> Result<MountNamespace, DropletError> {
+        Engine::require_root()?;
         let namespace = MountNamespace::init().map_err(|error| DropletError::io("open the mount namespace of init", error))?;
         namespace.enter().map_err(|error| DropletError::io("enter the mount namespace of init", error))?;
         Ok(namespace)

@@ -1,7 +1,7 @@
 //! Tests of the parsers of Android system program output, using output captured from
 //! Android 17 (API 37) and the formats documented by `cmd package help`.
 
-use android::{ComponentName, ComponentState, FontService, PackageManager, ProcessInfo};
+use android::{Capability, CapabilitySet, ComponentName, ComponentState, FontService, PackageManager, ProcessCapabilities, ProcessInfo};
 
 #[test]
 fn component_names_expand_relative_classes() {
@@ -98,4 +98,122 @@ fn process_names_are_the_first_argument() {
     assert!(process.belongs_to("com.android.systemui"));
     assert!(!process.belongs_to("com.android.system"));
     assert!(ProcessInfo { pid: 1, name: "com.android.systemui".to_string() }.belongs_to("com.android.systemui"));
+}
+
+#[test]
+fn capabilities_have_the_numbers_and_names_of_linux() {
+    // <linux/capability.h>
+    let expected = [
+        (Capability::CHOWN, 0, "CAP_CHOWN"),
+        (Capability::DAC_OVERRIDE, 1, "CAP_DAC_OVERRIDE"),
+        (Capability::DAC_READ_SEARCH, 2, "CAP_DAC_READ_SEARCH"),
+        (Capability::FOWNER, 3, "CAP_FOWNER"),
+        (Capability::FSETID, 4, "CAP_FSETID"),
+        (Capability::KILL, 5, "CAP_KILL"),
+        (Capability::SETGID, 6, "CAP_SETGID"),
+        (Capability::SETUID, 7, "CAP_SETUID"),
+        (Capability::SETPCAP, 8, "CAP_SETPCAP"),
+        (Capability::LINUX_IMMUTABLE, 9, "CAP_LINUX_IMMUTABLE"),
+        (Capability::NET_BIND_SERVICE, 10, "CAP_NET_BIND_SERVICE"),
+        (Capability::NET_BROADCAST, 11, "CAP_NET_BROADCAST"),
+        (Capability::NET_ADMIN, 12, "CAP_NET_ADMIN"),
+        (Capability::NET_RAW, 13, "CAP_NET_RAW"),
+        (Capability::IPC_LOCK, 14, "CAP_IPC_LOCK"),
+        (Capability::IPC_OWNER, 15, "CAP_IPC_OWNER"),
+        (Capability::SYS_MODULE, 16, "CAP_SYS_MODULE"),
+        (Capability::SYS_RAWIO, 17, "CAP_SYS_RAWIO"),
+        (Capability::SYS_CHROOT, 18, "CAP_SYS_CHROOT"),
+        (Capability::SYS_PTRACE, 19, "CAP_SYS_PTRACE"),
+        (Capability::SYS_PACCT, 20, "CAP_SYS_PACCT"),
+        (Capability::SYS_ADMIN, 21, "CAP_SYS_ADMIN"),
+        (Capability::SYS_BOOT, 22, "CAP_SYS_BOOT"),
+        (Capability::SYS_NICE, 23, "CAP_SYS_NICE"),
+        (Capability::SYS_RESOURCE, 24, "CAP_SYS_RESOURCE"),
+        (Capability::SYS_TIME, 25, "CAP_SYS_TIME"),
+        (Capability::SYS_TTY_CONFIG, 26, "CAP_SYS_TTY_CONFIG"),
+        (Capability::MKNOD, 27, "CAP_MKNOD"),
+        (Capability::LEASE, 28, "CAP_LEASE"),
+        (Capability::AUDIT_WRITE, 29, "CAP_AUDIT_WRITE"),
+        (Capability::AUDIT_CONTROL, 30, "CAP_AUDIT_CONTROL"),
+        (Capability::SETFCAP, 31, "CAP_SETFCAP"),
+        (Capability::MAC_OVERRIDE, 32, "CAP_MAC_OVERRIDE"),
+        (Capability::MAC_ADMIN, 33, "CAP_MAC_ADMIN"),
+        (Capability::SYSLOG, 34, "CAP_SYSLOG"),
+        (Capability::WAKE_ALARM, 35, "CAP_WAKE_ALARM"),
+        (Capability::BLOCK_SUSPEND, 36, "CAP_BLOCK_SUSPEND"),
+        (Capability::AUDIT_READ, 37, "CAP_AUDIT_READ"),
+        (Capability::PERFMON, 38, "CAP_PERFMON"),
+        (Capability::BPF, 39, "CAP_BPF"),
+        (Capability::CHECKPOINT_RESTORE, 40, "CAP_CHECKPOINT_RESTORE"),
+    ];
+    assert_eq!(expected.len(), Capability::NAMES.len());
+    for (capability, number, name) in expected {
+        assert_eq!(capability, Capability(number));
+        assert_eq!(capability.name(), Some(name));
+        assert_eq!(capability.to_string(), name);
+    }
+    assert_eq!(Capability(41).name(), None);
+    assert_eq!(Capability(41).to_string(), "capability 41");
+}
+
+#[test]
+fn capability_sets_have_one_bit_per_capability() {
+    let set = CapabilitySet::parse("0000000000200080").unwrap();
+    assert!(set.contains(Capability::SETUID));
+    assert!(set.contains(Capability::SYS_ADMIN));
+    assert!(!set.contains(Capability::CHOWN));
+    assert!(!set.contains(Capability::SYS_PTRACE));
+    let full = CapabilitySet::parse("ffffffffffffffff").unwrap();
+    assert!(full.contains(Capability(63)));
+    assert!(!full.contains(Capability(64)));
+    assert!(!full.contains(Capability(u8::MAX)));
+    for invalid in ["", "xyz", "10000000000000000"] {
+        assert_eq!(CapabilitySet::parse(invalid), None, "{invalid}");
+    }
+}
+
+/// The capability fields of `/proc/self/status`, as `cat` shows them in a root shell of
+/// Magisk 30.7 with the "Restrict" policy (Android 16).
+const RESTRICTED_STATUS: &str = "Name:\tcat
+Umask:\t0077
+State:\tR (running)
+Uid:\t0\t0\t0\t0
+Gid:\t0\t0\t0\t0
+CapInh:\t0000000000000000
+CapPrm:\t0000000000000000
+CapEff:\t0000000000000000
+CapBnd:\t0000000000000080
+CapAmb:\t0000000000000000
+NoNewPrivs:\t0
+";
+
+#[test]
+fn process_capabilities_are_read_from_the_status_file() {
+    let restricted = ProcessCapabilities::parse(RESTRICTED_STATUS).unwrap();
+    assert_eq!(restricted.inheritable, CapabilitySet(0));
+    assert_eq!(restricted.permitted, CapabilitySet(0));
+    assert_eq!(restricted.effective, CapabilitySet(0));
+    assert_eq!(restricted.bounding, CapabilitySet(1 << 7));
+    assert_eq!(restricted.ambient, CapabilitySet(0));
+
+    let full =
+        RESTRICTED_STATUS.replace("CapPrm:\t0000000000000000", "CapPrm:\t000001ffffffffff").replace("CapEff:\t0000000000000000", "CapEff:\t000001ffffffffff");
+    let full = ProcessCapabilities::parse(&full).unwrap();
+    assert_eq!(full.effective, CapabilitySet(0x1ff_ffff_ffff));
+    assert!(full.effective.contains(Capability::SYS_ADMIN));
+
+    // Kernels before Linux 4.3 have no ambient capabilities.
+    let old = RESTRICTED_STATUS.replace("CapAmb:\t0000000000000000\n", "");
+    assert_eq!(ProcessCapabilities::parse(&old).unwrap().ambient, CapabilitySet(0));
+
+    assert_eq!(ProcessCapabilities::parse(&RESTRICTED_STATUS.replace("CapEff:\t0000000000000000\n", "")), None);
+    assert_eq!(ProcessCapabilities::parse(&RESTRICTED_STATUS.replace("CapEff:\t0000000000000000", "CapEff:\tinvalid")), None);
+    assert_eq!(ProcessCapabilities::parse(&RESTRICTED_STATUS.replace("CapAmb:\t0000000000000000", "CapAmb:\tinvalid")), None);
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[test]
+fn process_capabilities_of_the_calling_thread_are_readable() {
+    let current = ProcessCapabilities::current().unwrap();
+    assert_eq!(current, ProcessCapabilities::of(std::process::id()).unwrap());
 }

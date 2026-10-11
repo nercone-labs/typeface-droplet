@@ -12,6 +12,7 @@ import dev.nercone.typefacedroplet.engine.EngineException
 import dev.nercone.typefacedroplet.engine.FamilyInfo
 import dev.nercone.typefacedroplet.engine.LogLine
 import dev.nercone.typefacedroplet.engine.StatusReport
+import dev.nercone.typefacedroplet.privilege.Privilege
 import dev.nercone.typefacedroplet.privilege.PrivilegeChoice
 import dev.nercone.typefacedroplet.privilege.PrivilegeSelection
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +30,9 @@ sealed interface Message {
     data object Reverted : Message
     data object Restarting : Message
     data class Failed(val text: String) : Message
+
+    /** Root runs through su, but the root manager restricts it, so the engine cannot work. */
+    data class Restricted(val text: String) : Message
 }
 
 data class UiState(
@@ -66,7 +70,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 block()
             } catch (error: EngineException) {
-                _state.update { it.copy(message = Message.Failed(error.message.orEmpty()), log = error.log) }
+                val restricted = error.kind == EngineException.RESTRICTED && _state.value.privilege?.privilege?.kind == Privilege.Kind.ROOT
+                val message = if (restricted) Message.Restricted(error.message.orEmpty()) else Message.Failed(error.message.orEmpty())
+                _state.update { it.copy(message = message, log = error.log) }
             } catch (error: Exception) {
                 _state.update { it.copy(message = Message.Failed(error.message ?: error.toString())) }
             } finally {
@@ -143,4 +149,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun dismissMessage() = _state.update { it.copy(message = null) }
+
+    /** Dismisses the message and checks the privilege and the system again. */
+    fun recheck() {
+        dismissMessage()
+        refresh()
+    }
 }

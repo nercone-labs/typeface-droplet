@@ -2,7 +2,7 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use android::CommandError;
+use android::{Capability, CommandError};
 use fontxml::FontXMLError;
 use mount::MountError;
 use sfnt::SFNTError;
@@ -36,6 +36,8 @@ pub enum DropletError {
     Command(CommandError),
     /// The engine refuses to act in the current situation.
     Refused(String),
+    /// The engine runs as root, but without these capabilities: the root manager restricts root.
+    Restricted(Vec<Capability>),
 }
 
 impl DropletError {
@@ -58,6 +60,7 @@ impl DropletError {
             DropletError::Mount(_) => "mount",
             DropletError::Command(_) => "command",
             DropletError::Refused(_) => "refused",
+            DropletError::Restricted(_) => "restricted",
         }
     }
 }
@@ -73,6 +76,10 @@ impl fmt::Display for DropletError {
             DropletError::Mount(error) => write!(formatter, "cannot {error}"),
             DropletError::Command(error) => write!(formatter, "{error}"),
             DropletError::Refused(reason) => formatter.write_str(reason),
+            DropletError::Restricted(missing) => {
+                let names: Vec<String> = missing.iter().map(Capability::to_string).collect();
+                write!(formatter, "the engine runs as root, but without {}: the root manager restricts root for this application", names.join(", "))
+            }
         }
     }
 }

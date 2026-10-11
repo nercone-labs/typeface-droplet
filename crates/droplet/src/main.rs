@@ -134,7 +134,10 @@ options: --store DIR   the store directory, an absolute path (default /data/adb/
                 Err(problem) => json!({ "problems": [problem] }),
             }),
             Command::Families => engine.families().and_then(|families| CommandLine::json(&families)),
-            Command::Apply { config, boot } => CommandLine::read(&config)
+            // The configuration lives in the private directory of the application, which only
+            // an unrestricted root can read; checking first names the actual problem.
+            Command::Apply { config, boot } => Engine::require_root()
+                .and_then(|()| CommandLine::read(&config))
                 .and_then(|text| Config::parse(&text).map_err(|problem| DropletError::Config(vec![problem])))
                 .and_then(|config| engine.apply(&config, boot))
                 .and_then(|report| CommandLine::json(&report)),

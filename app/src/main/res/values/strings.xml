@@ -70,6 +70,9 @@
     <string name="outcome_restarted">Restarted: %1$s</string>
     <string name="outcome_reverted">The original fonts are back. Applications that are running keep the replacement fonts until they restart.</string>
     <string name="outcome_restarting">The system is restarting softly.</string>
+    <string name="restricted_title">Root is restricted</string>
+    <string name="restricted_text">su runs this application as root, but the root manager has removed the capabilities of root, so fonts can be neither applied nor restored. In Magisk, open Superuser and change the access of TypeFace Droplet from \"Restrict\" to \"Grant\". Other root managers have similar settings, such as the app profile of KernelSU.</string>
+    <string name="restricted_recheck">Check again</string>
     <string name="log">Engine log</string>
     <string name="show_all">Show all %1$d lines</string>
     <string name="show_less">Show less</string>

@@ -58,7 +58,8 @@ object HomeScreen {
                 }
             }
             TextButton(onClick = model::refresh, enabled = state.operation == null, modifier = Modifier.align(Alignment.End)) { Text(stringResource(R.string.refresh)) }
-            state.message?.let { Outcome(it, onSoftRestart = model::softRestart, onDismiss = model::dismissMessage) }
+            // Restricted root is explained in a dialog on every screen (`DropletApp.Restricted`).
+            state.message?.takeIf { it !is Message.Restricted }?.let { Outcome(it, onSoftRestart = model::softRestart, onDismiss = model::dismissMessage) }
             if (state.log.isNotEmpty()) Log(state.log)
         }
     }
@@ -143,7 +144,7 @@ object HomeScreen {
 
     @Composable
     fun Outcome(message: Message, onSoftRestart: () -> Unit, onDismiss: () -> Unit) {
-        val failed = message is Message.Failed
+        val failed = message is Message.Failed || message is Message.Restricted
         Widgets.Section(
             stringResource(if (failed) R.string.outcome_failed else R.string.outcome),
             container = if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
@@ -165,6 +166,7 @@ object HomeScreen {
                 Message.Reverted -> Text(stringResource(R.string.outcome_reverted))
                 Message.Restarting -> Text(stringResource(R.string.outcome_restarting))
                 is Message.Failed -> Text(message.text)
+                is Message.Restricted -> Text(message.text)
             }
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text(stringResource(R.string.dismiss)) }
         }

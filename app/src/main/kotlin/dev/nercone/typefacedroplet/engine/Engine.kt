@@ -10,7 +10,12 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 
 /** A failed engine command, with the engine log of the attempt. */
-class EngineException(val kind: String, message: String, val log: List<LogLine>) : Exception(message)
+class EngineException(val kind: String, message: String, val log: List<LogLine>) : Exception(message) {
+    companion object {
+        /** The engine runs as root, but the root manager removed the capabilities it needs. */
+        const val RESTRICTED = "restricted"
+    }
+}
 
 /** The successful result of an engine command, with the engine log. */
 data class EngineResult<T>(val value: T, val log: List<LogLine>)

@@ -7,6 +7,10 @@ user interface.
 - **Privileges**: su (Magisk, KernelSU, APatch and others), Sui, or Shizuku started with root.
   Shizuku started through ADB runs as the shell user, which cannot change system mounts or the
   components of other applications, so it cannot apply fonts; the application explains this.
+  Root must keep its capabilities: Magisk's "Restrict" Superuser policy (the default for new
+  applications when "Restrict root capabilities" is enabled) drops them, and the engine then
+  refuses to run, naming the missing capabilities; the application then explains how to grant
+  full root ("Grant" instead of "Restrict").
 - **Fonts**: the Nercone Sans, Serif and Mono CJK NF fonts are bundled; any TTF, OTF or TTC file
   can be imported.
 - **Roles and rules**: a role is a set of faces (fonts with a style, an optional fixed weight and

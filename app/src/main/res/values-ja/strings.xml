@@ -67,6 +67,9 @@
     <string name="outcome_restarted">再起動したアプリ: %1$s</string>
     <string name="outcome_reverted">元のフォントに戻しました。実行中のアプリは、再起動するまで置き換えたフォントのままです。</string>
     <string name="outcome_restarting">システムをソフトリスタートしています。</string>
+    <string name="restricted_title">root が制限されています</string>
+    <string name="restricted_text">su によってこのアプリは root として実行されていますが、root マネージャーが root のケーパビリティ (権限) を取り除いているため、フォントの適用も復元もできません。Magisk の場合は「スーパーユーザー」を開き、TypeFace Droplet のアクセスを「Restrict」から「許可」に変更してください。KernelSU のアプリプロファイルなど、他の root マネージャーにも同様の設定があります。</string>
+    <string name="restricted_recheck">再確認</string>
     <string name="log">エンジンのログ</string>
     <string name="show_all">%1$d 行すべて表示</string>
     <string name="show_less">折りたたむ</string>
