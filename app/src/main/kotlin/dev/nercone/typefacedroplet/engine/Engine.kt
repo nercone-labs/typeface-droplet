@@ -25,9 +25,9 @@ data class EngineResult<T>(val value: T, val log: List<LogLine>)
  * Commands that read or change the system run through a `Privilege`; inspecting font files
  * runs as the application itself.
  */
-class Engine(private val context: Context) {
+class Engine(val context: Context) {
     val executable: String = File(context.applicationInfo.nativeLibraryDir, EXECUTABLE).absolutePath
-    private val json = EngineJson.json
+    val json = EngineJson.json
 
     fun decode(output: String): EngineResponse {
         val line = output.lineSequence().lastOrNull { it.startsWith("{") }
@@ -94,6 +94,12 @@ class Engine(private val context: Context) {
     }
 
     suspend fun revert(privilege: Privilege): EngineResult<RevertReport> = run(privilege, listOf("revert"), RevertReport.serializer())
+
+    /** Installs the boot scripts that apply the saved configuration before the framework starts. */
+    suspend fun installHook(privilege: Privilege): EngineResult<BootHook> =
+        run(privilege, listOf("hook", "install", "--package", context.packageName), BootHook.serializer())
+
+    suspend fun removeHook(privilege: Privilege): EngineResult<BootHook> = run(privilege, listOf("hook", "remove"), BootHook.serializer())
 
     suspend fun softRestart(privilege: Privilege, guardSeconds: Int): EngineResult<SoftRestartReport> =
         run(privilege, listOf("soft-restart", "--seconds", guardSeconds.toString()), SoftRestartReport.serializer())

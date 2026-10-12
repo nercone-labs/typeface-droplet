@@ -13,4 +13,10 @@ impl ActivityManager {
             output: output.clone(),
         })
     }
+
+    /// Kills every process that the activity manager considers safe to kill: cached and other
+    /// background processes. Visible and persistent processes are left alone.
+    pub fn kill_background() -> Result<(), CommandError> {
+        SystemCommand::run(SystemCommand::CMD, &["activity", "kill-all"]).map(|_| ())
+    }
 }

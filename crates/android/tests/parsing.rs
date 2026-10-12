@@ -217,3 +217,10 @@ fn process_capabilities_of_the_calling_thread_are_readable() {
     let current = ProcessCapabilities::current().unwrap();
     assert_eq!(current, ProcessCapabilities::of(std::process::id()).unwrap());
 }
+
+#[test]
+fn package_names_are_read_from_package_lines() {
+    let output = "package:com.android.systemui\npackage:android\n\npackage:\nWARNING: linker\n";
+    assert_eq!(PackageManager::parse_packages(output), ["com.android.systemui", "android"]);
+    assert!(PackageManager::parse_packages("").is_empty());
+}

@@ -11,13 +11,14 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import dev.nercone.typefacedroplet.DropletApplication
 import dev.nercone.typefacedroplet.R
-import dev.nercone.typefacedroplet.engine.EngineException
+import dev.nercone.typefacedroplet.engine.ReloadOutcome
 import dev.nercone.typefacedroplet.privilege.PrivilegeChoice
 import dev.nercone.typefacedroplet.ui.MainActivity
 
 /**
- * Applies the configuration at boot. A privilege that is available at once (such as su) is
- * used at once; Shizuku may start after this application, so when Shizuku is installed (or Sui
+ * Applies the configuration after a boot when the boot hook did not (no root manager runs boot
+ * scripts, or the hook is disabled). A privilege that is available at once (such as su) is used
+ * at once; Shizuku may start after this application, so when Shizuku is installed (or Sui
  * provides it) and nothing else is available, its binder is awaited first. The user is notified
  * when the configuration cannot be applied, including when the engine refuses because its guard
  * tripped during the previous boot.
@@ -25,17 +26,15 @@ import dev.nercone.typefacedroplet.ui.MainActivity
 class ApplyWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
         val droplet = (applicationContext as DropletApplication).droplet
-        val waitForShizuku = droplet.settings.privilege != PrivilegeChoice.ROOT && droplet.shizuku.mayStart()
+        val waitForShizuku = droplet.settings.values.value.privilege != PrivilegeChoice.ROOT && droplet.shizuku.mayStart()
         if (waitForShizuku && droplet.selectPrivilege().privilege == null) {
             droplet.shizuku.awaitBinder(BINDER_TIMEOUT_MILLIS)
         }
         return try {
-            val result = droplet.apply(boot = true)
-            if (result.value.reloaded == false) notify(applicationContext.getString(R.string.boot_not_reloaded))
+            droplet.initialize()
+            val applied = droplet.applyAfterBoot()
+            if (applied?.report?.reload == ReloadOutcome.IGNORED) notify(applicationContext.getString(R.string.boot_not_reloaded))
             Result.success()
-        } catch (error: EngineException) {
-            notify(applicationContext.getString(R.string.boot_failed, error.message))
-            Result.failure()
         } catch (error: Exception) {
             notify(applicationContext.getString(R.string.boot_failed, error.message ?: error.toString()))
             Result.failure()
@@ -44,12 +43,7 @@ class ApplyWorker(context: Context, parameters: WorkerParameters) : CoroutineWor
 
     fun notify(text: String) {
         if (applicationContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
-        val intent = PendingIntent.getActivity(
-            applicationContext,
-            0,
-            Intent(applicationContext, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE,
-        )
+        val intent = PendingIntent.getActivity(applicationContext, 0, Intent(applicationContext, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(applicationContext, DropletApplication.CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(applicationContext.getString(R.string.app_name))
@@ -62,7 +56,7 @@ class ApplyWorker(context: Context, parameters: WorkerParameters) : CoroutineWor
     }
 
     companion object {
-        const val NAME = "apply-at-boot"
+        const val NAME = "apply-after-boot"
         const val NOTIFICATION_ID = 1
         const val BINDER_TIMEOUT_MILLIS = 120_000L
     }

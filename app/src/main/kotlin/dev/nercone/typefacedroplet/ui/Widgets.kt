@@ -4,29 +4,46 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExposedDropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItemColors
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,28 +52,116 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import dev.nercone.typefacedroplet.R
 
 /** User interface parts shared by the screens. */
 object Widgets {
     val SCREEN_PADDING = 16.dp
-    val SPACING = 12.dp
+    val SPACING = 16.dp
 
-    /** A card with a title, used for every group of content. */
+    /** The tone of a notice. */
+    enum class Tone { INFORMATION, WARNING, ERROR }
+
+    /** The title of a group of items. */
     @Composable
-    fun Section(
-        title: String,
-        modifier: Modifier = Modifier,
-        container: Color = MaterialTheme.colorScheme.surfaceContainerLow,
-        content: @Composable ColumnScope.() -> Unit,
+    fun Header(text: String, modifier: Modifier = Modifier) {
+        Text(
+            text,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
+        )
+    }
+
+    /** A group of segmented list items: rounded as a whole, with a small gap between the items. */
+    @Composable
+    fun Group(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+        Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap), content = content)
+    }
+
+    /** An item of a group. `index` and `count` decide which corners are rounded. */
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun Item(
+        index: Int,
+        count: Int,
+        headline: String,
+        supporting: String? = null,
+        icon: ImageVector? = null,
+        enabled: Boolean = true,
+        trailing: (@Composable () -> Unit)? = null,
+        colors: ListItemColors = ListItemDefaults.segmentedColors(),
+        onClick: (() -> Unit)? = null,
     ) {
-        Card(modifier = modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = container)) {
+        val shapes = ListItemDefaults.segmentedShapes(index, count)
+        val leading: (@Composable () -> Unit)? = icon?.let { { Icon(it, null) } }
+        val support: (@Composable () -> Unit)? = supporting?.let { { Text(it) } }
+        if (onClick != null) {
+            SegmentedListItem(
+                onClick = onClick,
+                shapes = shapes,
+                enabled = enabled,
+                leadingContent = leading,
+                trailingContent = trailing,
+                supportingContent = support,
+                colors = colors,
+            ) { Text(headline) }
+        } else {
+            SegmentedListItem(shapes = shapes, enabled = enabled, leadingContent = leading, trailingContent = trailing, supportingContent = support, colors = colors) {
+                Text(headline)
+            }
+        }
+    }
+
+    /** An item with a switch; the whole item toggles it. */
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun SwitchItem(index: Int, count: Int, headline: String, supporting: String?, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
+        SegmentedListItem(
+            checked = checked,
+            onCheckedChange = onChange,
+            shapes = ListItemDefaults.segmentedShapes(index, count),
+            enabled = enabled,
+            supportingContent = supporting?.let { { Text(it) } },
+            trailingContent = { Switch(checked = checked, onCheckedChange = null, enabled = enabled) },
+        ) { Text(headline) }
+    }
+
+    /** An item with a radio button; the whole item selects it. */
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun RadioItem(index: Int, count: Int, headline: String, supporting: String?, selected: Boolean, onSelect: () -> Unit) {
+        SegmentedListItem(
+            selected = selected,
+            onClick = onSelect,
+            shapes = ListItemDefaults.segmentedShapes(index, count),
+            leadingContent = { RadioButton(selected = selected, onClick = null) },
+            supportingContent = supporting?.let { { Text(it) } },
+        ) { Text(headline) }
+    }
+
+    /** A message in a tinted container, with optional actions below it. */
+    @Composable
+    fun Notice(tone: Tone, title: String, text: String?, modifier: Modifier = Modifier, actions: (@Composable () -> Unit)? = null) {
+        val (container, content, icon) = when (tone) {
+            Tone.INFORMATION -> Triple(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer, Icons.Default.Info)
+            Tone.WARNING -> Triple(MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer, Icons.Default.WarningAmber)
+            Tone.ERROR -> Triple(MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer, Icons.Default.ErrorOutline)
+        }
+        Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = container, contentColor = content) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                content()
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(icon, null)
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                }
+                text?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                actions?.let { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) { it() } }
             }
         }
     }
@@ -118,6 +223,38 @@ object Widgets {
         )
     }
 
+    /** A full-screen editor with a close button and a save action. */
+    @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun Editor(title: String, canSave: Boolean, onSave: () -> Unit, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+        Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                topBar = {
+                    TopAppBar(
+                        title = { Text(title) },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        navigationIcon = { IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.cancel)) } },
+                        actions = {
+                            androidx.compose.material3.Button(
+                                onClick = onSave,
+                                enabled = canSave,
+                                shapes = ButtonDefaults.shapes(),
+                                modifier = Modifier.padding(end = 8.dp),
+                            ) { Text(stringResource(R.string.save)) }
+                        },
+                    )
+                },
+            ) { padding ->
+                Column(
+                    Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(SCREEN_PADDING),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    content = content,
+                )
+            }
+        }
+    }
+
     /**
      * An editor of fixed variation axis values (`tag` → value). Tags `wght` and `ital` are
      * refused, because weights and styles control them.
@@ -156,11 +293,11 @@ object Widgets {
 
     /** An editable list of strings, such as packages or components. */
     @Composable
-    fun StringList(items: List<String>, label: String, describe: (String) -> String, validate: (String) -> Boolean, onChange: (List<String>) -> Unit) {
+    fun StringList(items: List<String>, label: String, validate: (String) -> Boolean, onChange: (List<String>) -> Unit) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items.forEach { item ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(describe(item), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Text(item, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     IconButton(onClick = { onChange(items - item) }) { Icon(Icons.Default.Close, stringResource(R.string.remove)) }
                 }
             }
@@ -174,4 +311,7 @@ object Widgets {
             }
         }
     }
+
+    /** The color of secondary text. */
+    val secondary: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
 }

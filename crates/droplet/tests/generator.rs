@@ -419,7 +419,7 @@ fn preset_reproduces_typeface_magic() {
     let Action::Prepend(entries) = &config.rules.last().unwrap().action else { panic!() };
     assert_eq!(entries.iter().map(|entry| entry.fallback_for.as_deref()).collect::<Vec<_>>(), [None, Some("serif"), Some("monospace")]);
     assert_eq!(config.components.len(), 2);
-    assert_eq!(config.restart, ["com.android.systemui", Config::HOME]);
+    assert_eq!(config.restart, ["com.android.systemui", Config::HOME, Config::BACKGROUND]);
 
     let (_, document, report) = generate(DocumentKind::FontsXML, 33, &config, API33_FONTS);
     assert!(report.inserted.len() == 1);

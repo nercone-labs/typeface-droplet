@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use fontxml::{Document, Root};
-use mount::MountTable;
+use mount::{MountTable, SELinuxContext};
 use serde::{Deserialize, Serialize};
 
 /// The font configuration documents of the system that the engine generates.
@@ -107,5 +107,27 @@ impl DocumentKind {
             ));
         }
         Ok(())
+    }
+}
+
+/// A system document as the system shows it without generated documents.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SystemDocument {
+    pub kind: DocumentKind,
+    pub text: String,
+    /// The SELinux context of the document, which the generated document takes over:
+    /// some documents have a context of their own (font_fallback.xml has
+    /// `system_font_fallback_file`, readable by zygote and system_server only).
+    pub label: Option<String>,
+}
+
+impl SystemDocument {
+    /// Reads the document of `kind` at its path, or returns `None` if the system has none.
+    pub fn read(kind: DocumentKind) -> std::io::Result<Option<SystemDocument>> {
+        match fs::read_to_string(kind.path()) {
+            Ok(text) => Ok(Some(SystemDocument { kind, text, label: SELinuxContext::get(kind.path()).ok() })),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 }

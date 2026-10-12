@@ -21,14 +21,14 @@ import rikka.sui.Sui
  * Shizuku runs as: root when Shizuku was started with root, or Sui; shell when it was started
  * through ADB, which cannot apply fonts.
  */
-class ShizukuPrivilege(private val context: Context) : Privilege {
-    private val mutex = Mutex()
-    private var service: ICommandService? = null
+class ShizukuPrivilege(val context: Context) : Privilege {
+    val mutex = Mutex()
+    var service: ICommandService? = null
 
     override val kind: Privilege.Kind
         get() = if (isSui) Privilege.Kind.SUI else Privilege.Kind.SHIZUKU
 
-    private val arguments = Shizuku.UserServiceArgs(ComponentName(context.packageName, CommandService::class.java.name))
+    val arguments = Shizuku.UserServiceArgs(ComponentName(context.packageName, CommandService::class.java.name))
         .daemon(false)
         .processNameSuffix(PROCESS_SUFFIX)
         .version(SERVICE_VERSION)
@@ -136,7 +136,6 @@ class ShizukuPrivilege(private val context: Context) : Privilege {
 
         /** Whether Sui provides the Shizuku interface. Set once by `initialize`. */
         var isSui = false
-            private set
 
         /** Detects Sui; must run once at application start, before Shizuku is used. */
         fun initialize(context: Context) {

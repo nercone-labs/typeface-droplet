@@ -87,4 +87,61 @@ class EngineModelsTest {
         assertEquals(GuardState.Passed, report.guard)
         assertEquals(ComponentRecord(0, "a.b/.C", "default"), report.components.single())
     }
+
+    @Test
+    fun applyReportsCarryTheReloadOutcome() {
+        val text = """{"generation":2,"documents":{"fontFallbackXML":{"replaced":[["sans-serif","sans"],["roboto","sans"]],"inserted":[["ja",["sans"]]],"files":["a.ttf"]},
+            "fontsXML":{"replaced":[["sans-serif","sans"]],"inserted":[],"files":["a.ttf"]}},"fonts":[],"reload":"atStart","restarted":["@background"],"guard":7}"""
+        val report = json.decodeFromString(ApplyReport.serializer(), text)
+        assertEquals(ReloadOutcome.AT_START, report.reload)
+        assertEquals("the document with the most replacements counts", 2, report.replaced)
+        for ((name, outcome) in listOf("served" to ReloadOutcome.SERVED, "ignored" to ReloadOutcome.IGNORED, "unchanged" to ReloadOutcome.UNCHANGED)) {
+            assertEquals(outcome, json.decodeFromString(ReloadOutcome.serializer(), "\"$name\""))
+        }
+    }
+
+    @Test
+    fun statusReportsTheBootHook() {
+        val status = """{"api":35,"uid":0,"applied":false,"saved":true,"generation":1,"mounted":[],"directories":[],"served":[],"guard":{"state":"idle"},
+            "components":[],"documents":["fontsXML"],"hook":{"managers":["magisk","kernelSU","aPatch"],"scripts":["/data/adb/post-mount.d/typeface-droplet.sh"]}}"""
+        val report = json.decodeFromString(StatusReport.serializer(), status)
+        assertTrue(report.saved)
+        assertEquals(listOf(RootManager.MAGISK, RootManager.KERNEL_SU, RootManager.APATCH), report.hook.managers)
+        assertTrue(report.hook.installed)
+        assertFalse(BootHook(listOf(RootManager.MAGISK)).installed)
+    }
+
+    @Test
+    fun restartTargetsAndComponentsFollowTheEngineValidation() {
+        for (target in listOf("com.android.systemui", Config.HOME, Config.BACKGROUND)) assertTrue(target, Config.isRestartTarget(target))
+        for (target in listOf("@other", "systemui", "a..b", "1a.b", "")) assertFalse(target, Config.isRestartTarget(target))
+        assertTrue(Config.isComponent("com.google.android.gms/.fonts.provider.FontsProvider"))
+        assertTrue(Config.isComponent("a.b/a.b.C\$Inner"))
+        assertFalse(Config.isComponent("a.b"))
+        assertFalse(Config.isComponent("a.b/"))
+    }
+
+    @Test
+    fun roleOperationsKeepRulesConsistent() {
+        val config = Config(
+            roles = listOf(Role("sans", listOf(Face("a"))), Role("mono", listOf(Face("b")))),
+            rules = listOf(
+                Rule(Matcher.Family("sans-serif"), Action.Replace("sans")),
+                Rule(Matcher.Language("ja"), Action.Prepend(listOf(FallbackEntry("sans"), FallbackEntry("mono", "monospace")))),
+                Rule(Matcher.Family("monospace"), Action.Replace("mono")),
+            ),
+        )
+        val renamed = config.replaceRole("sans", Role("gothic", listOf(Face("c"))))
+        assertEquals(listOf("gothic", "mono"), renamed.roles.map { it.name })
+        assertEquals(Action.Replace("gothic"), renamed.rules[0].action)
+        assertEquals(listOf("gothic", "mono"), renamed.rules[1].action.roles)
+        val deleted = config.deleteRole("mono")
+        assertEquals(listOf("sans"), deleted.roles.map { it.name })
+        assertEquals("a rule left without a role is removed, a prepend keeps its other entries", 2, deleted.rules.size)
+        assertEquals(listOf("sans"), deleted.rules[1].action.roles)
+        assertEquals(2, config.rulesUsing("sans").size)
+        assertEquals("sans (2)", config.uniqueRoleName("sans"))
+        assertEquals("serif", config.uniqueRoleName("serif"))
+        assertEquals(config.copy(roles = config.roles + Role("new", listOf(Face("d")))), config.replaceRole("new", Role("new", listOf(Face("d")))))
+    }
 }

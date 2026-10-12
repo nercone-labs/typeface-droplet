@@ -63,4 +63,9 @@ impl SystemProperty {
     pub fn sdk() -> Option<u32> {
         SystemProperty::get(SystemProperty::SDK)?.trim().parse().ok()
     }
+
+    /// Whether the system has finished booting (`sys.boot_completed` is `1`).
+    pub fn is_boot_completed() -> bool {
+        SystemProperty::get(SystemProperty::BOOT_COMPLETED).is_some_and(|value| value.trim() == "1")
+    }
 }

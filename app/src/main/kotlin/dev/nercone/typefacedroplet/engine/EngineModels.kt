@@ -91,6 +91,24 @@ data class FallbackEntry(val role: String, val fallbackFor: String? = null)
 sealed interface Action {
     data class Replace(val role: String) : Action
     data class Prepend(val entries: List<FallbackEntry>) : Action
+
+    /** The roles the action uses. */
+    val roles: List<String>
+        get() = when (this) {
+            is Replace -> listOf(role)
+            is Prepend -> entries.map { it.role }
+        }
+
+    fun renameRole(from: String, to: String): Action = when (this) {
+        is Replace -> if (role == from) Replace(to) else this
+        is Prepend -> Prepend(entries.map { if (it.role == from) it.copy(role = to) else it })
+    }
+
+    /** The action without the role `name`, or `null` if nothing would be left of it. */
+    fun withoutRole(name: String): Action? = when (this) {
+        is Replace -> takeIf { role != name }
+        is Prepend -> entries.filter { it.role != name }.takeIf { it.isNotEmpty() }?.let { Prepend(it) }
+    }
 }
 
 /** A rule. Serialized as `{"match": {...}, "replace": role}` or `{"match": {...}, "prepend": [...]}`. */
@@ -98,7 +116,7 @@ sealed interface Action {
 data class Rule(val match: Matcher, val action: Action) {
     object Serializer : KSerializer<Rule> {
         override val descriptor: SerialDescriptor = buildClassSerialDescriptor("Rule")
-        private val entries = ListSerializer(FallbackEntry.serializer())
+        val entries = ListSerializer(FallbackEntry.serializer())
 
         override fun serialize(encoder: Encoder, value: Rule) {
             val json = (encoder as JsonEncoder).json
@@ -138,18 +156,47 @@ data class Config(
 ) {
     fun role(name: String): Role? = roles.firstOrNull { it.name == name }
 
-    /** The names of the roles some rule uses. */
-    fun usedRoles(): Set<String> = rules.flatMapTo(mutableSetOf()) { rule ->
-        when (val action = rule.action) {
-            is Action.Replace -> listOf(action.role)
-            is Action.Prepend -> action.entries.map { it.role }
-        }
+    fun font(id: String): FontEntry? = fonts.firstOrNull { it.id == id }
+
+    /** The rules whose action uses the role `name`. */
+    fun rulesUsing(name: String): List<Rule> = rules.filter { name in it.action.roles }
+
+    /** Replaces the role `name` with `role`, renaming it in every rule; adds `role` if there is no role `name`. */
+    fun replaceRole(name: String, role: Role): Config {
+        if (role(name) == null) return copy(roles = roles + role)
+        return copy(
+            roles = roles.map { if (it.name == name) role else it },
+            rules = rules.map { rule -> rule.copy(action = rule.action.renameRole(name, role.name)) },
+        )
     }
+
+    /** Removes the role `name` and every use of it; a rule left with nothing to do is removed. */
+    fun deleteRole(name: String): Config = copy(
+        roles = roles.filter { it.name != name },
+        rules = rules.mapNotNull { rule -> rule.action.withoutRole(name)?.let { rule.copy(action = it) } },
+    )
+
+    /** A role name that no role has yet, based on `base`. */
+    fun uniqueRoleName(base: String): String {
+        val names = roles.map { it.name }.toSet()
+        return generateSequence(1) { it + 1 }.map { if (it == 1) base else "$base ($it)" }.first { it !in names }
+    }
+
+    /** The names of the roles some rule uses. */
+    fun usedRoles(): Set<String> = rules.flatMapTo(mutableSetOf()) { it.action.roles }
 
     companion object {
         const val VERSION = 1
         const val HOME = "@home"
+        const val BACKGROUND = "@background"
         const val MAX_NAME_LENGTH = 63
+        const val MAX_GUARD_SECONDS = 3600
+        val PACKAGE = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
+        val COMPONENT = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+/[A-Za-z0-9_.$]+")
+
+        fun isRestartTarget(target: String): Boolean = target == HOME || target == BACKGROUND || PACKAGE.matches(target)
+
+        fun isComponent(component: String): Boolean = COMPONENT.matches(component)
     }
 }
 
@@ -247,11 +294,26 @@ sealed interface GuardState {
     }
 }
 
+/** A root manager that runs boot scripts before the Android framework starts. */
+@Serializable
+enum class RootManager {
+    @SerialName("magisk") MAGISK,
+    @SerialName("kernelSU") KERNEL_SU,
+    @SerialName("aPatch") APATCH,
+}
+
+/** The boot scripts that apply the saved configuration before the framework starts. */
+@Serializable
+data class BootHook(val managers: List<RootManager> = emptyList(), val scripts: List<String> = emptyList()) {
+    val installed: Boolean get() = scripts.isNotEmpty()
+}
+
 @Serializable
 data class StatusReport(
     val api: Int? = null,
     val uid: Long,
     val applied: Boolean,
+    val saved: Boolean = false,
     val generation: Long,
     val mounted: List<String>,
     val directories: List<String>,
@@ -259,6 +321,7 @@ data class StatusReport(
     val guard: GuardState,
     val components: List<ComponentRecord>,
     val documents: List<String>,
+    val hook: BootHook = BootHook(),
 )
 
 @Serializable
@@ -267,15 +330,34 @@ data class GenerationReport(val replaced: List<List<String>>, val inserted: List
 @Serializable
 data class InstalledFont(val id: String, val fileName: String, val path: String, val index: Int, val face: FaceInfo)
 
+/** How the font service took the generated documents. */
+@Serializable
+enum class ReloadOutcome {
+    /** Processes started from now on use the new fonts. */
+    @SerialName("served") SERVED,
+
+    /** The font service did not reload; a soft restart is needed. */
+    @SerialName("ignored") IGNORED,
+
+    /** No rule matched any family of the system. */
+    @SerialName("unchanged") UNCHANGED,
+
+    /** The framework had not started and reads the documents when it starts. */
+    @SerialName("atStart") AT_START,
+}
+
 @Serializable
 data class ApplyReport(
     val generation: Long,
     val documents: Map<String, GenerationReport>,
     val fonts: List<InstalledFont>,
-    val reloaded: Boolean? = null,
+    val reload: ReloadOutcome,
     val restarted: List<String>,
     val guard: Int? = null,
-)
+) {
+    /** The number of families replaced in the document the framework reads. */
+    val replaced: Int get() = documents.values.maxOfOrNull { it.replaced.size } ?: 0
+}
 
 @Serializable
 data class RevertReport(val restarted: List<String>)

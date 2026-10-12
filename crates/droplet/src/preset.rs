@@ -52,7 +52,9 @@ impl Preset {
     pub const COMPONENTS: [&'static str; 2] =
         ["com.google.android.gms/.fonts.provider.FontsProvider", "com.google.android.gms/.fonts.update.UpdateSchedulerService"];
 
-    pub const RESTART: [&'static str; 2] = ["com.android.systemui", Config::HOME];
+    /// SystemUI and the home application are visible at once; background applications would
+    /// otherwise keep the old fonts until the system happens to kill them.
+    pub const RESTART: [&'static str; 3] = ["com.android.systemui", Config::HOME, Config::BACKGROUND];
 
     /// The family names written into the fonts of each standard role, so that applications
     /// that look fonts up by name find the replacement under the original name.

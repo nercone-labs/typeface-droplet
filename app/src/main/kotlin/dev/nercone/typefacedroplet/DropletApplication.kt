@@ -7,7 +7,6 @@ import dev.nercone.typefacedroplet.privilege.ShizukuPrivilege
 
 class DropletApplication : Application() {
     lateinit var droplet: Droplet
-        private set
 
     override fun onCreate() {
         super.onCreate()

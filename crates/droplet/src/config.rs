@@ -143,7 +143,8 @@ pub struct Config {
     #[serde(default)]
     pub components: Vec<String>,
     /// Packages whose processes are restarted after applying, so that they load the new fonts.
-    /// `@home` stands for the default home application.
+    /// `@home` stands for the default home application and `@background` for every process
+    /// the activity manager may kill safely (cached and other background processes).
     #[serde(default)]
     pub restart: Vec<String>,
     /// How long to watch system_server after reloading the fonts; 0 disables the guard.
@@ -157,6 +158,7 @@ pub struct Config {
 impl Config {
     pub const VERSION: u32 = 1;
     pub const HOME: &'static str = "@home";
+    pub const BACKGROUND: &'static str = "@background";
     pub const MAX_GUARD_SECONDS: u32 = 3600;
     pub const MAX_NAME_LENGTH: usize = 63;
 
@@ -284,8 +286,8 @@ impl Config {
             }
         }
         for target in &self.restart {
-            if target != Config::HOME && !Config::is_package_name(target) {
-                problems.push(format!("restart target \"{target}\" is not a package name or {}", Config::HOME));
+            if !Config::is_restart_target(target) {
+                problems.push(format!("restart target \"{target}\" is not a package name, {} or {}", Config::HOME, Config::BACKGROUND));
             }
         }
         if self.guard_seconds > Config::MAX_GUARD_SECONDS {
@@ -309,6 +311,10 @@ impl Config {
 
     pub fn is_valid_name(name: &str) -> bool {
         !name.is_empty() && name.chars().count() <= Config::MAX_NAME_LENGTH && !name.chars().any(char::is_control)
+    }
+
+    pub fn is_restart_target(target: &str) -> bool {
+        target == Config::HOME || target == Config::BACKGROUND || Config::is_package_name(target)
     }
 
     pub fn is_package_name(name: &str) -> bool {

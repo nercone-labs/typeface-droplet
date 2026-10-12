@@ -9,12 +9,15 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import dev.nercone.typefacedroplet.config.Settings
 
-/** Re-applies the configuration after a boot, as mounts do not survive a reboot. */
+/**
+ * Checks after a boot that the configuration is applied, and applies it if not: mounts do not
+ * survive a reboot, and the boot hook may be missing or covered by another module.
+ */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
-        val settings = Settings(context)
-        if (!settings.applyAtBoot || !settings.applied) return
+        val settings = Settings(context).values.value
+        if (!settings.applyAfterBoot || !settings.applied) return
         val request = OneTimeWorkRequestBuilder<ApplyWorker>()
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()

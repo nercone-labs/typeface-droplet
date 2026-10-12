@@ -8,8 +8,8 @@ import dev.nercone.typefacedroplet.library.LibraryFont
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -20,26 +20,28 @@ import kotlinx.coroutines.withContext
  * the rules actually use.
  */
 class ConfigRepository(context: Context) {
-    private val file = File(context.filesDir, FILE)
-    private val _config = MutableStateFlow<Config?>(null)
-    val config: StateFlow<Config?> = _config.asStateFlow()
+    val file = File(context.filesDir, FILE)
+    val config = MutableStateFlow<Config?>(null)
+    val mutex = Mutex()
 
     suspend fun load(): Config? = withContext(Dispatchers.IO) {
         runCatching { EngineJson.json.decodeFromString(Config.serializer(), file.readText()) }.getOrNull()
-    }.also { _config.value = it }
+    }.also { config.value = it }
 
-    suspend fun save(config: Config) {
-        _config.value = config
-        withContext(Dispatchers.IO) {
-            val temporary = File(file.parentFile, "$FILE.tmp")
-            temporary.writeText(EngineJson.json.encodeToString(Config.serializer(), config))
-            temporary.renameTo(file)
-        }
+    suspend fun save(next: Config) = mutex.withLock { write(next) }
+
+    /** Replaces the configuration with `transform` of the current one, if there is one. */
+    suspend fun update(transform: suspend (Config) -> Config) = mutex.withLock {
+        config.value?.let { write(transform(it)) }
     }
 
-    suspend fun update(transform: (Config) -> Config) {
-        val current = _config.value ?: return
-        save(transform(current))
+    suspend fun write(next: Config) {
+        config.value = next
+        withContext(Dispatchers.IO) {
+            val temporary = File(file.parentFile, "$FILE.tmp")
+            temporary.writeText(EngineJson.json.encodeToString(Config.serializer(), next))
+            if (!temporary.renameTo(file)) throw IllegalStateException("cannot save $file")
+        }
     }
 
     companion object {
@@ -48,9 +50,7 @@ class ConfigRepository(context: Context) {
         /** Makes `fonts` match the library: new fonts are added, removed fonts dropped, moved fonts updated. */
         fun synchronize(config: Config, library: List<LibraryFont>): Config {
             val known = config.fonts.associateBy { it.id }
-            val fonts = library.map { font ->
-                known[font.id]?.copy(source = font.source) ?: FontEntry(font.id, font.source)
-            }
+            val fonts = library.map { font -> known[font.id]?.copy(source = font.source) ?: FontEntry(font.id, font.source) }
             return config.copy(fonts = fonts)
         }
     }

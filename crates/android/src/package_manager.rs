@@ -163,6 +163,27 @@ impl PackageManager {
         }
     }
 
+    /// Whether `package` is installed. The answer comes from the full list of packages, which
+    /// the package manager gives only when it works; a failure of the command, or a list
+    /// without the system package itself, is an error rather than "not installed".
+    pub fn is_installed(package: &str) -> Result<bool, CommandError> {
+        let output = SystemCommand::run(SystemCommand::CMD, &["package", "list", "packages"])?;
+        let packages = PackageManager::parse_packages(&output);
+        if !packages.contains(&PackageManager::SYSTEM_PACKAGE) {
+            return Err(CommandError::Failed {
+                command: "cmd package list packages".to_string(),
+                status: Some(0),
+                output: "the list has no system package".to_string(),
+            });
+        }
+        Ok(packages.contains(&package))
+    }
+
+    /// The package names of `cmd package list packages` output (`package:<name>` lines).
+    pub fn parse_packages(output: &str) -> Vec<&str> {
+        output.lines().filter_map(|line| line.trim().strip_prefix("package:")).filter(|name| !name.is_empty()).collect()
+    }
+
     /// The package of the default home activity of `user`, or `None` if there is no default.
     pub fn home_package(user: u32) -> Result<Option<String>, CommandError> {
         let user = user.to_string();

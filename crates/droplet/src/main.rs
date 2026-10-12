@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use droplet::{Config, DropletError, Engine, FontInfo, FontSource, FontStore, Guard, GuardTarget, LogLine, Preset, SourceReader};
+use droplet::{ApplyMode, Config, DropletError, Engine, FontInfo, FontSource, FontStore, Guard, GuardTarget, LogLine, Preset, SourceReader};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -13,11 +13,15 @@ enum Command {
     Preset(PathBuf),
     Validate(PathBuf),
     Families,
-    Apply { config: PathBuf, boot: bool },
+    Apply { config: PathBuf, mode: ApplyMode },
+    Boot { package: String },
     Revert,
     Status,
     SoftRestart { seconds: u32 },
     Guard { seconds: u32, target: GuardTarget },
+    InstallHook { package: String },
+    RemoveHook,
+    Cleanup { package: String },
     Version,
 }
 
@@ -38,9 +42,12 @@ impl CommandLine {
        droplet preset <preset.json>
        droplet validate <config.json>
        droplet apply <config.json> [--boot]
+       droplet boot --package PACKAGE
+       droplet hook install --package PACKAGE | droplet hook remove
+       droplet cleanup --package PACKAGE
        droplet families | revert | status | version
        droplet soft-restart [--seconds N]
-       droplet guard --seconds N (--pid PID | --after PID)
+       droplet guard --seconds N (--pid PID | --after PID | --boot)
 options: --store DIR   the store directory, an absolute path (default /data/adb/typeface-droplet)";
 
     fn parse() -> Result<CommandLine, lexopt::Error> {
@@ -55,15 +62,21 @@ options: --store DIR   the store directory, an absolute path (default /data/adb/
         let mut seconds = 60u32;
         let mut after: Option<u32> = None;
         let mut pid: Option<u32> = None;
+        let mut boot_target = false;
+        let mut package: Option<String> = None;
         while let Some(argument) = parser.next()? {
             match argument {
                 Long("store") => store = parser.value()?.parse()?,
                 Long("offset") => offset = parser.value()?.parse()?,
                 Long("length") => length = Some(parser.value()?.parse()?),
-                Long("boot") => boot = true,
+                Long("boot") => {
+                    boot = true;
+                    boot_target = true;
+                }
                 Long("seconds") => seconds = parser.value()?.parse()?,
                 Long("after") => after = Some(parser.value()?.parse()?),
                 Long("pid") => pid = Some(parser.value()?.parse()?),
+                Long("package") => package = Some(parser.value()?.string()?),
                 Value(value) if name.is_none() => name = Some(value.string()?),
                 Value(value) => positional.push(value.string()?),
                 _ => return Err(argument.unexpected()),
@@ -74,22 +87,33 @@ options: --store DIR   the store directory, an absolute path (default /data/adb/
         };
         let source =
             |positional: &[String]| -> Result<FontSource, lexopt::Error> { Ok(FontSource { path: PathBuf::from(first(positional)?), offset, length }) };
+        let package_name = || -> Result<String, lexopt::Error> {
+            package.clone().filter(|name| Config::is_package_name(name)).ok_or_else(|| lexopt::Error::from("--package needs a package name"))
+        };
         let command = match name.as_deref() {
             Some("inspect") => Command::Inspect(source(&positional)?),
             Some("hash") => Command::Hash(source(&positional)?),
             Some("preset") => Command::Preset(first(&positional)?.into()),
             Some("validate") => Command::Validate(first(&positional)?.into()),
             Some("families") => Command::Families,
-            Some("apply") => Command::Apply { config: first(&positional)?.into(), boot },
+            Some("apply") => Command::Apply { config: first(&positional)?.into(), mode: if boot { ApplyMode::Boot } else { ApplyMode::Manual } },
+            Some("boot") => Command::Boot { package: package_name()? },
+            Some("hook") => match positional.first().map(String::as_str) {
+                Some("install") => Command::InstallHook { package: package_name()? },
+                Some("remove") => Command::RemoveHook,
+                _ => return Err(lexopt::Error::from("hook needs install or remove")),
+            },
+            Some("cleanup") => Command::Cleanup { package: package_name()? },
             Some("revert") => Command::Revert,
             Some("status") => Command::Status,
             Some("soft-restart") => Command::SoftRestart { seconds },
             Some("guard") => Command::Guard {
                 seconds,
-                target: match (pid, after) {
-                    (Some(pid), None) => GuardTarget::Running(pid),
-                    (None, Some(previous)) => GuardTarget::After(previous),
-                    _ => return Err(lexopt::Error::from("guard needs exactly one of --pid and --after")),
+                target: match (pid, after, boot_target) {
+                    (Some(pid), None, false) => GuardTarget::Running(pid),
+                    (None, Some(previous), false) => GuardTarget::After(previous),
+                    (None, None, true) => GuardTarget::Boot,
+                    _ => return Err(lexopt::Error::from("guard needs exactly one of --pid, --after and --boot")),
                 },
             },
             Some("version") => Command::Version,
@@ -136,11 +160,15 @@ options: --store DIR   the store directory, an absolute path (default /data/adb/
             Command::Families => engine.families().and_then(|families| CommandLine::json(&families)),
             // The configuration lives in the private directory of the application, which only
             // an unrestricted root can read; checking first names the actual problem.
-            Command::Apply { config, boot } => Engine::require_root()
+            Command::Apply { config, mode } => Engine::require_root()
                 .and_then(|()| CommandLine::read(&config))
                 .and_then(|text| Config::parse(&text).map_err(|problem| DropletError::Config(vec![problem])))
-                .and_then(|config| engine.apply(&config, boot))
+                .and_then(|config| engine.apply(&config, mode))
                 .and_then(|report| CommandLine::json(&report)),
+            Command::Boot { package } => engine.boot(&package).and_then(|report| CommandLine::json(&report)),
+            Command::InstallHook { package } => engine.install_hook(&package).and_then(|hook| CommandLine::json(&hook)),
+            Command::RemoveHook => engine.remove_hook().and_then(|hook| CommandLine::json(&hook)),
+            Command::Cleanup { package } => engine.cleanup(&package).map(|cleaned| json!({ "cleaned": cleaned })),
             Command::Revert => engine.revert().map(|restarted| json!({ "restarted": restarted })),
             Command::Status => engine.status().and_then(|status| CommandLine::json(&status)),
             Command::SoftRestart { seconds } => engine.soft_restart(seconds).map(|guard| json!({ "guard": guard })),

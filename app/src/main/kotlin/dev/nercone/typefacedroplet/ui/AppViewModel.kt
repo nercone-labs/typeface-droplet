@@ -5,34 +5,37 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.nercone.typefacedroplet.Droplet
 import dev.nercone.typefacedroplet.DropletApplication
-import dev.nercone.typefacedroplet.engine.ApplyReport
+import dev.nercone.typefacedroplet.config.Slot
 import dev.nercone.typefacedroplet.engine.Config
 import dev.nercone.typefacedroplet.engine.EngineException
 import dev.nercone.typefacedroplet.engine.FamilyInfo
 import dev.nercone.typefacedroplet.engine.LogLine
 import dev.nercone.typefacedroplet.engine.StatusReport
-import dev.nercone.typefacedroplet.privilege.Privilege
 import dev.nercone.typefacedroplet.privilege.PrivilegeChoice
 import dev.nercone.typefacedroplet.privilege.PrivilegeSelection
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/** An operation the user started, shown while it runs. */
-enum class Operation { PREPARING, CHECKING, APPLYING, REVERTING, RESTARTING, IMPORTING, LOADING_FAMILIES, RESETTING }
+/** An operation the user started, shown while it runs. Only one runs at a time. */
+enum class Operation { PREPARING, CHECKING, APPLYING, REVERTING, RESTARTING, IMPORTING, LOADING_FAMILIES, CONFIGURING_BOOT }
 
-/** A message for the user about the outcome of an operation. */
-sealed interface Message {
-    data class Applied(val report: ApplyReport) : Message
-    data object Reverted : Message
-    data object Restarting : Message
-    data class Failed(val text: String) : Message
+/** What the user is told about the last operation. */
+sealed interface Outcome {
+    data class Applied(val applied: Droplet.Applied) : Outcome
+    data object Reverted : Outcome
+    data object Restarting : Outcome
 
-    /** Root runs through su, but the root manager restricts it, so the engine cannot work. */
-    data class Restricted(val text: String) : Message
+    /** `kind` is the kind of the engine error, such as `restricted`, or `null` for other errors. */
+    data class Failed(val text: String, val kind: String?) : Outcome {
+        val restricted: Boolean get() = kind == EngineException.RESTRICTED
+    }
 }
 
 data class UiState(
@@ -40,85 +43,89 @@ data class UiState(
     val operation: Operation? = null,
     val privilege: PrivilegeSelection? = null,
     val status: StatusReport? = null,
-    val families: List<FamilyInfo> = emptyList(),
-    val message: Message? = null,
+    val outcome: Outcome? = null,
     val log: List<LogLine> = emptyList(),
-    val privilegeChoice: PrivilegeChoice = PrivilegeChoice.AUTOMATIC,
-    val applyAtBoot: Boolean = true,
+    /** The families of the system documents, once loaded. */
+    val families: List<FamilyInfo>? = null,
 )
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     val droplet = (application as DropletApplication).droplet
-    val library = droplet.library.fonts
+    val fonts = droplet.library.fonts
     val config = droplet.configs.config
-
-    private val _state = MutableStateFlow(UiState(privilegeChoice = droplet.settings.privilege, applyAtBoot = droplet.settings.applyAtBoot))
-    val state: StateFlow<UiState> = _state.asStateFlow()
+    val settings = droplet.settings.values
+    val state = MutableStateFlow(UiState())
 
     init {
         run(Operation.PREPARING) {
             droplet.initialize()
-            _state.update { it.copy(ready = true) }
+            state.update { it.copy(ready = true) }
             refreshNow()
         }
     }
 
+    /** Runs `block` as `operation`, unless another operation runs; failures become the outcome. */
     fun run(operation: Operation, block: suspend () -> Unit) {
-        if (_state.value.operation != null && operation != Operation.PREPARING) return
-        _state.update { it.copy(operation = operation) }
+        if (state.value.operation != null && operation != Operation.PREPARING) return
+        state.update { it.copy(operation = operation) }
         viewModelScope.launch {
             try {
                 block()
             } catch (error: EngineException) {
-                val restricted = error.kind == EngineException.RESTRICTED && _state.value.privilege?.privilege?.kind == Privilege.Kind.ROOT
-                val message = if (restricted) Message.Restricted(error.message.orEmpty()) else Message.Failed(error.message.orEmpty())
-                _state.update { it.copy(message = message, log = error.log) }
+                state.update { it.copy(outcome = Outcome.Failed(error.message.orEmpty(), error.kind), log = error.log) }
             } catch (error: Exception) {
-                _state.update { it.copy(message = Message.Failed(error.message ?: error.toString())) }
+                state.update { it.copy(outcome = Outcome.Failed(error.message ?: error.toString(), null)) }
             } finally {
-                _state.update { it.copy(operation = null) }
+                state.update { it.copy(operation = null) }
+            }
+        }
+    }
+
+    /** Edits that touch no system state run at once, independently of operations. */
+    fun edit(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (error: Exception) {
+                state.update { it.copy(outcome = Outcome.Failed(error.message ?: error.toString(), null)) }
             }
         }
     }
 
     suspend fun refreshNow() {
         val selection = droplet.selectPrivilege()
-        _state.update { it.copy(privilege = selection) }
-        if (selection.privilege != null) {
-            val status = droplet.status().value
-            _state.update { it.copy(status = status) }
-        } else {
-            _state.update { it.copy(status = null) }
-        }
+        state.update { it.copy(privilege = selection) }
+        val status = if (selection.privilege != null) droplet.status().value else null
+        state.update { it.copy(status = status) }
     }
 
     fun refresh() = run(Operation.CHECKING) { refreshNow() }
 
     fun apply() = run(Operation.APPLYING) {
-        val result = droplet.apply(boot = false)
-        _state.update { it.copy(message = Message.Applied(result.value), log = result.log) }
+        val applied = droplet.apply(boot = false)
+        state.update { it.copy(outcome = Outcome.Applied(applied), log = applied.log) }
         refreshNow()
     }
 
     fun revert() = run(Operation.REVERTING) {
         val result = droplet.revert()
-        _state.update { it.copy(message = Message.Reverted, log = result.log) }
+        state.update { it.copy(outcome = Outcome.Reverted, log = result.log) }
         refreshNow()
     }
 
     fun softRestart() = run(Operation.RESTARTING) {
         val result = droplet.softRestart()
-        _state.update { it.copy(message = Message.Restarting, log = result.log) }
+        state.update { it.copy(outcome = Outcome.Restarting, log = result.log) }
     }
 
-    fun requestShizukuPermission() = run(Operation.CHECKING) {
+    fun grantShizuku() = run(Operation.CHECKING) {
         droplet.shizuku.requestPermission()
         refreshNow()
     }
 
     fun loadFamilies() = run(Operation.LOADING_FAMILIES) {
         val result = droplet.families()
-        _state.update { it.copy(families = result.value) }
+        state.update { it.copy(families = result.value) }
     }
 
     fun importFont(uri: Uri) = run(Operation.IMPORTING) {
@@ -129,30 +136,48 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         droplet.importFont(uri, name)
     }
 
-    fun removeFont(id: String) = run(Operation.IMPORTING) { droplet.removeFont(id) }
+    fun removeFont(id: String) = edit { droplet.removeFont(id) }
 
-    fun resetConfig() = run(Operation.RESETTING) { droplet.configs.save(droplet.recommended()) }
+    /** The pending change of a font name: names are typed a character at a time. */
+    var renaming: Job? = null
 
-    fun updateConfig(transform: (Config) -> Config) {
-        viewModelScope.launch { droplet.configs.update(transform) }
+    fun rename(id: String, name: String?) {
+        renaming?.cancel()
+        renaming = viewModelScope.launch {
+            delay(RENAME_DELAY_MILLIS)
+            withContext(NonCancellable) {
+                try {
+                    droplet.rename(id, name)
+                } catch (error: Exception) {
+                    state.update { it.copy(outcome = Outcome.Failed(error.message ?: error.toString(), null)) }
+                }
+            }
+        }
     }
+
+    fun select(slot: Slot, font: String?) = edit { droplet.select(slot, font) }
+
+    fun customize(transform: (Config) -> Config) = edit { droplet.customize(transform) }
+
+    fun configure(transform: (Config) -> Config) = edit { droplet.configure(transform) }
+
+    fun reset() = edit { droplet.reset() }
 
     fun setPrivilegeChoice(choice: PrivilegeChoice) {
-        droplet.settings.privilege = choice
-        _state.update { it.copy(privilegeChoice = choice) }
+        droplet.settings.update { it.copy(privilege = choice) }
         refresh()
     }
 
-    fun setApplyAtBoot(enabled: Boolean) {
-        droplet.settings.applyAtBoot = enabled
-        _state.update { it.copy(applyAtBoot = enabled) }
+    fun setBootHook(enabled: Boolean) = run(Operation.CONFIGURING_BOOT) {
+        droplet.setBootHook(enabled)
+        refreshNow()
     }
 
-    fun dismissMessage() = _state.update { it.copy(message = null) }
+    fun setApplyAfterBoot(enabled: Boolean) = droplet.settings.update { it.copy(applyAfterBoot = enabled) }
 
-    /** Dismisses the message and checks the privilege and the system again. */
-    fun recheck() {
-        dismissMessage()
-        refresh()
+    fun dismissOutcome() = state.update { it.copy(outcome = null) }
+
+    companion object {
+        const val RENAME_DELAY_MILLIS = 600L
     }
 }

@@ -9,7 +9,7 @@ use serde::Serialize;
 use sfnt::{FontFile, FontFormat, FontRebuilder, NameTable, Tag};
 use sha2::{Digest, Sha256};
 
-use crate::{DropletError, FaceInfo, FontEntry, FontInfo, FontSource, Log, SourceReader};
+use crate::{Config, DropletError, FaceInfo, FontEntry, FontInfo, FontSource, Log, SourceReader};
 
 /// A font file installed in the store, ready to be mounted.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -41,6 +41,8 @@ impl FontStore {
     /// The version of the way installed fonts are written. It is part of their file names, so
     /// that a change of the writing never reuses a font written the old way.
     pub const FORMAT: u32 = 1;
+    pub const EXECUTABLE: &'static str = "droplet";
+    pub const EXECUTABLE_MODE: u32 = 0o700;
 
     pub fn new(root: impl Into<PathBuf>, context: Option<String>) -> FontStore {
         FontStore { root: root.into(), context }
@@ -73,6 +75,17 @@ impl FontStore {
 
     pub fn lock_path(&self) -> PathBuf {
         self.root.join("lock")
+    }
+
+    /// The configuration applied last, which the boot hook applies again at every boot.
+    pub fn config_path(&self) -> PathBuf {
+        self.root.join("config.json")
+    }
+
+    /// The copy of the engine that the boot hook runs: the application's own copy moves with
+    /// every update of the application.
+    pub fn executable_path(&self) -> PathBuf {
+        self.root.join("bin").join(FontStore::EXECUTABLE)
     }
 
     /// Takes the exclusive lock of the store, waiting for other engine processes to release it.
@@ -110,17 +123,19 @@ impl FontStore {
         format!("{}{digest}.{extension}", FontStore::FILE_PREFIX)
     }
 
-    /// Gives a file the mode and SELinux context of a system file.
-    pub fn label(&self, path: &Path) -> Result<(), DropletError> {
+    /// Gives a file the mode of a system file and the SELinux context `context`, or the
+    /// context of the store when `context` is `None`.
+    pub fn label(&self, path: &Path, context: Option<&str>) -> Result<(), DropletError> {
         fs::set_permissions(path, fs::Permissions::from_mode(FontStore::FILE_MODE)).map_err(|error| DropletError::io_at("set the mode of", path, error))?;
-        if let Some(context) = &self.context {
+        if let Some(context) = context.or(self.context.as_deref()) {
             SELinuxContext::set(path, context).map_err(|error| DropletError::io_at("label", path, error))?;
         }
         Ok(())
     }
 
-    /// Writes `data` to `path` atomically (through a temporary file) and labels it.
-    pub fn write(&self, path: &Path, data: &[u8]) -> Result<(), DropletError> {
+    /// Writes `data` to `path` atomically (through a temporary file) and labels it with
+    /// `context`, or with the context of the store when `context` is `None`.
+    pub fn write(&self, path: &Path, data: &[u8], context: Option<&str>) -> Result<(), DropletError> {
         let temporary = path.with_extension("tmp");
         let mut file = OpenOptions::new()
             .write(true)
@@ -130,8 +145,54 @@ impl FontStore {
             .open(&temporary)
             .map_err(|error| DropletError::io_at("create", &temporary, error))?;
         file.write_all(data).and_then(|_| file.sync_all()).map_err(|error| DropletError::io_at("write", &temporary, error))?;
-        self.label(&temporary)?;
+        self.label(&temporary, context)?;
         fs::rename(&temporary, path).map_err(|error| DropletError::io_at("rename", &temporary, error))
+    }
+
+    /// Saves the configuration that the boot hook applies.
+    pub fn save_config(&self, config: &Config) -> Result<(), DropletError> {
+        let text = serde_json::to_string_pretty(config).map_err(|error| DropletError::io("serialize the configuration", io::Error::other(error)))?;
+        self.write(&self.config_path(), text.as_bytes(), None)
+    }
+
+    /// The saved configuration, or `None` if no configuration is saved.
+    pub fn load_config(&self) -> Result<Option<Config>, DropletError> {
+        let path = self.config_path();
+        match fs::read_to_string(&path) {
+            Ok(text) => Config::parse(&text).map(Some).map_err(|problem| DropletError::Config(vec![problem])),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(DropletError::io_at("read", &path, error)),
+        }
+    }
+
+    /// Removes the saved configuration, so that the boot hook applies nothing.
+    pub fn remove_config(&self) -> Result<(), DropletError> {
+        let path = self.config_path();
+        match fs::remove_file(&path) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(DropletError::io_at("remove", &path, error)),
+            _ => Ok(()),
+        }
+    }
+
+    /// Copies the running engine to `executable_path`, replacing an earlier copy atomically.
+    pub fn install_executable(&self) -> Result<PathBuf, DropletError> {
+        let source = std::env::current_exe().map_err(|error| DropletError::io("find the engine executable", error))?;
+        let target = self.executable_path();
+        if source == target {
+            return Ok(target);
+        }
+        let directory = target.parent().unwrap_or(&self.root);
+        fs::create_dir_all(directory).map_err(|error| DropletError::io_at("create", directory, error))?;
+        let temporary = target.with_extension("tmp");
+        fs::copy(&source, &temporary).map_err(|error| DropletError::io_at("copy the engine to", &temporary, error))?;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(FontStore::EXECUTABLE_MODE))
+            .map_err(|error| DropletError::io_at("set the mode of", &temporary, error))?;
+        if let Some(context) = &self.context {
+            SELinuxContext::set(&temporary, context).map_err(|error| DropletError::io_at("label", &temporary, error))?;
+        }
+        File::open(&temporary).and_then(|file| file.sync_all()).map_err(|error| DropletError::io_at("write", &temporary, error))?;
+        fs::rename(&temporary, &target).map_err(|error| DropletError::io_at("rename", &temporary, error))?;
+        Ok(target)
     }
 
     /// The installed file of `entry`, if it is installed. The extension depends on the format
@@ -176,7 +237,7 @@ impl FontStore {
         self.write_font(entry, &file, &mut reader, &temporary).inspect_err(|_| {
             let _ = fs::remove_file(&temporary);
         })?;
-        self.label(&temporary)?;
+        self.label(&temporary, None)?;
         fs::rename(&temporary, &path).map_err(|error| DropletError::io_at("rename", &temporary, error))?;
         log.info(format!("installed {} as {file_name}", entry.source.path.display()));
         Ok(path)

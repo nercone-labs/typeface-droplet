@@ -21,3 +21,4 @@ lexopt.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 rustix.workspace = true
+libc.workspace = true
