@@ -147,7 +147,7 @@
     <string name="font_used_by">使用中のロール: %1$s</string>
     <string name="font_missing">見つからないフォント</string>
     <string name="font_rename">フォントに書き込むファミリー名</string>
-    <string name="font_rename_help">名前でフォントを探すアプリ(Firefox など)は、この名前でフォントを見つけます。空欄の場合、選んだフォントには置き換えるファミリーの名前(Roboto・Noto Serif・Droid Sans Mono)が付きます(欄内に表示)。</string>
+    <string name="font_rename_help">名前でフォントを探すアプリ(Firefox など)は、この名前でフォントを見つけます。空欄の場合、フォントは置き換えるファミリーごとにインストールされ、それぞれ元のフォントの名前(Roboto・Google Sans・Noto Serif など)が付きます。</string>
     <string name="font_remove_title">このフォントを削除しますか?</string>
     <string name="font_remove_text">フォントファイルをライブラリから削除します。</string>
     <string name="font_remove_in_use">使用中のフォントは削除できません。</string>

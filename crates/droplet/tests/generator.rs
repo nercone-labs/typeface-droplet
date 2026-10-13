@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use droplet::{
-    Action, AxisInfo, Config, DocumentKind, Face, FaceInfo, FaceStyle, FallbackEntry, FontEntry, FontSource, Generator, InstalledFont, Matcher, Pattern,
-    Preset, Role, Rule,
+    Action, AxisInfo, Config, DocumentKind, Face, FaceInfo, FaceStyle, FallbackEntry, FontEntry, FontKey, FontSource, Generator, InstalledFont, Matcher,
+    Pattern, Preset, Role, Rule,
 };
 use fontxml::{Document, Element, Family, Font};
 
@@ -42,7 +42,12 @@ fn face(weight: u16, italic: bool, axes: Vec<AxisInfo>) -> FaceInfo {
 
 /// Fonts: 1 = variable upright (wght 100-900, opsz), 2 = variable italic, 3 = static bold,
 /// 4 = static regular, 5 = variable with wght 300-700 and ital 0-1, 6 = face 2 of a collection.
-fn fonts() -> HashMap<String, InstalledFont> {
+fn fonts() -> HashMap<FontKey, InstalledFont> {
+    copies(&[None])
+}
+
+/// The fonts of `fonts`, each installed once per family name of `families`.
+fn copies(families: &[Option<&str>]) -> HashMap<FontKey, InstalledFont> {
     let entries = [
         (1, face(400, false, vec![axis("opsz", 14.0, 14.0, 32.0), axis("wght", 100.0, 400.0, 900.0)]), 0),
         (2, face(400, true, vec![axis("wght", 100.0, 400.0, 900.0)]), 0),
@@ -56,9 +61,21 @@ fn fonts() -> HashMap<String, InstalledFont> {
     ];
     entries
         .into_iter()
-        .map(|(seed, face, index)| {
-            let file_name = format!("TypeFaceDroplet-test{seed}.{}", if index > 0 { "ttc" } else { "ttf" });
-            (id(seed), InstalledFont { id: id(seed), path: PathBuf::from(format!("/store/{file_name}")), file_name, index, face })
+        .flat_map(|(seed, face, index)| {
+            families.iter().map(move |family| {
+                let suffix = family.map(|family| format!("-{}", family.replace(' ', ""))).unwrap_or_default();
+                let file_name = format!("TypeFaceDroplet-test{seed}{suffix}.{}", if index > 0 { "ttc" } else { "ttf" });
+                let family = family.map(str::to_string);
+                let font = InstalledFont {
+                    id: id(seed),
+                    family: family.clone(),
+                    path: PathBuf::from(format!("/store/{file_name}")),
+                    file_name,
+                    index,
+                    face: face.clone(),
+                };
+                (FontKey::new(id(seed), family), font)
+            })
         })
         .collect()
 }
@@ -385,9 +402,7 @@ fn preset_reproduces_typeface_magic() {
         Preset { sans: Some(entry(1)), sans_italic: Some(entry(2)), serif: Some(entry(4)), serif_italic: None, mono: Some(entry(3)), mono_italic: None };
     let config = preset.config();
     assert!(config.validate().is_empty(), "{:?}", config.validate());
-    assert_eq!(config.font(&id(1)).unwrap().rename.as_deref(), Some("Roboto"));
-    assert_eq!(config.font(&id(4)).unwrap().rename.as_deref(), Some("Noto Serif"));
-    assert_eq!(config.font(&id(3)).unwrap().rename.as_deref(), Some("Droid Sans Mono"));
+    assert!(config.fonts.iter().all(|font| font.rename.is_none()), "fonts are named after the families they replace, not with a fixed name");
     let order: Vec<(&str, &str)> = config
         .rules
         .iter()
@@ -434,4 +449,82 @@ fn preset_reproduces_typeface_magic() {
     for name in ["sans-serif", "sans-serif-condensed", "serif", "monospace", "serif-monospace"] {
         assert!(named(&document, name).fonts().iter().all(|font| font.file.starts_with("TypeFaceDroplet-")), "{name}");
     }
+}
+
+/// The family names of the original fonts of the fixtures, as their name tables give them.
+fn original_family(font: &Font) -> Option<String> {
+    let stem = Generator::stem(&font.file);
+    let family = match stem {
+        _ if stem.starts_with("RobotoFlex") => "Roboto Flex",
+        _ if stem.starts_with("Roboto") => "Roboto",
+        _ if stem.starts_with("GoogleSans") => "Google Sans",
+        _ if stem.starts_with("NotoSerif-") || stem == "NotoSerif" => "Noto Serif",
+        "DroidSansMono" => "Droid Sans Mono",
+        "CutiveMono" => "Cutive Mono",
+        _ => return None,
+    };
+    Some(family.to_string())
+}
+
+#[test]
+fn replaced_families_use_copies_named_after_their_original_fonts() {
+    let preset =
+        Preset { sans: Some(entry(1)), sans_italic: Some(entry(2)), serif: Some(entry(4)), serif_italic: None, mono: Some(entry(3)), mono_italic: None };
+    let config = preset.config();
+    let families = [None, Some("Roboto"), Some("Roboto Flex"), Some("Google Sans"), Some("Noto Serif"), Some("Droid Sans Mono"), Some("Cutive Mono")];
+    let fonts = copies(&families);
+    let primary = HashMap::from([
+        ("sans".to_string(), Some("Roboto".to_string())),
+        ("serif".to_string(), Some("Noto Serif".to_string())),
+        ("mono".to_string(), Some("Droid Sans Mono".to_string())),
+    ]);
+
+    let mut generator = Generator::new(DocumentKind::FontsXML, 33, &config, &fonts).with_families(&original_family).with_primary(primary.clone());
+    let document = Document::parse(generator.generate(&Document::parse(API33_FONTS).unwrap()).unwrap().as_str()).unwrap();
+    let file = |name: &str| named(&document, name).fonts()[0].file.clone();
+    assert_eq!(file("sans-serif"), "TypeFaceDroplet-test1-Roboto.ttf");
+    assert_eq!(file("serif"), "TypeFaceDroplet-test4-NotoSerif.ttf");
+    assert_eq!(file("monospace"), "TypeFaceDroplet-test3-DroidSansMono.ttf");
+    assert_eq!(file("serif-monospace"), "TypeFaceDroplet-test3-CutiveMono.ttf");
+    assert_eq!(generator.role_families.get("sans"), Some(&Some("Roboto".to_string())), "the first family a role replaces");
+    // The inserted fallback family uses the copies of the primary families, which need no copy of their own.
+    let inserted = document.items.iter().find(|item| matches!(&item.element, Element::Family(family) if family.name().is_none() && family.fonts.iter().any(|font| font.file.starts_with("TypeFaceDroplet-")))).unwrap();
+    let mut files: Vec<&str> = inserted.element.fonts().iter().map(|font| font.file.as_str()).collect();
+    files.dedup();
+    assert_eq!(
+        files,
+        [
+            "TypeFaceDroplet-test1-Roboto.ttf",
+            "TypeFaceDroplet-test2-Roboto.ttf",
+            "TypeFaceDroplet-test4-NotoSerif.ttf",
+            "TypeFaceDroplet-test3-DroidSansMono.ttf"
+        ]
+    );
+    assert!(generator.report.requested.iter().all(|key| key.family.is_some()));
+    assert!(generator.report.requested.contains(&FontKey::new(id(2), Some("Roboto".to_string()))));
+
+    let mut generator = Generator::new(DocumentKind::FontsCustomizationXML, 35, &config, &fonts).with_families(&original_family).with_primary(primary.clone());
+    let custom = Document::parse(generator.generate(&Document::parse(CUSTOMIZATION).unwrap()).unwrap().as_str()).unwrap();
+    assert_eq!(named(&custom, "google-sans-text").fonts()[0].file, "TypeFaceDroplet-test1-GoogleSans.ttf");
+
+    // A font the configuration names gets that name everywhere.
+    let mut named_config = config.clone();
+    named_config.fonts.iter_mut().find(|font| font.id == id(1)).unwrap().rename = Some("Roboto Flex".to_string());
+    let mut generator = Generator::new(DocumentKind::FontsCustomizationXML, 35, &named_config, &fonts).with_families(&original_family).with_primary(primary);
+    let custom = Document::parse(generator.generate(&Document::parse(CUSTOMIZATION).unwrap()).unwrap().as_str()).unwrap();
+    assert_eq!(named(&custom, "google-sans-text").fonts()[0].file, "TypeFaceDroplet-test1-RobotoFlex.ttf");
+    assert!(generator.report.requested.contains(&FontKey::new(id(1), Some("Roboto Flex".to_string()))));
+    assert!(!generator.report.requested.contains(&FontKey::new(id(1), Some("Google Sans".to_string()))));
+}
+
+#[test]
+fn copies_that_are_not_installed_are_still_requested() {
+    let preset = Preset { sans: Some(entry(1)), ..Default::default() };
+    let config = preset.config();
+    let none = HashMap::new();
+    let mut generator = Generator::new(DocumentKind::FontsXML, 33, &config, &none).with_families(&original_family);
+    Document::parse(API33_FONTS).unwrap().transform(&mut generator);
+    assert!(generator.report.replaced.is_empty(), "nothing is replaced without installed fonts");
+    assert!(generator.report.requested.contains(&FontKey::new(id(1), Some("Roboto".to_string()))));
+    assert_eq!(generator.role_families.get("sans"), Some(&Some("Roboto".to_string())));
 }

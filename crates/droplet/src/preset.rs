@@ -56,14 +56,10 @@ impl Preset {
     /// otherwise keep the old fonts until the system happens to kill them.
     pub const RESTART: [&'static str; 3] = ["com.android.systemui", Config::HOME, Config::BACKGROUND];
 
-    /// The family names written into the fonts of each standard role, so that applications
-    /// that look fonts up by name find the replacement under the original name.
-    pub const SANS_NAME: &'static str = "Roboto";
-    pub const SERIF_NAME: &'static str = "Noto Serif";
-    pub const MONO_NAME: &'static str = "Droid Sans Mono";
-
     /// The recommended configuration: the behavior of TypeFace Magic v2.0.0, except that the
-    /// family pattern google-sans-* is tried after the font files instead of before them.
+    /// family pattern google-sans-* is tried after the font files instead of before them, and
+    /// that a font is not given a fixed family name: unless it is named, the generator gives
+    /// each family it replaces a copy named after the original fonts of that family.
     pub fn config(&self) -> Config {
         let mut config = Config {
             version: Config::VERSION,
@@ -75,19 +71,15 @@ impl Preset {
             guard_seconds: 60,
             allow_unknown_versions: false,
         };
-        let roles = [
-            (Preset::SANS, Preset::SANS_NAME, &self.sans, &self.sans_italic),
-            (Preset::SERIF, Preset::SERIF_NAME, &self.serif, &self.serif_italic),
-            (Preset::MONO, Preset::MONO_NAME, &self.mono, &self.mono_italic),
-        ];
-        for (role, name, upright, italic) in roles {
+        let roles =
+            [(Preset::SANS, &self.sans, &self.sans_italic), (Preset::SERIF, &self.serif, &self.serif_italic), (Preset::MONO, &self.mono, &self.mono_italic)];
+        for (role, upright, italic) in roles {
             let mut faces = Vec::new();
             for (font, style) in [(upright, FaceStyle::Normal), (italic, FaceStyle::Italic)] {
-                if let Some(font) = font {
-                    let entry = FontEntry { rename: font.rename.clone().or_else(|| Some(name.to_string())), ..font.clone() };
+                if let Some(entry) = font {
                     faces.push(Face { font: entry.id.clone(), style: Some(style), weight: None, axes: Default::default() });
                     if config.font(&entry.id).is_none() {
-                        config.fonts.push(entry);
+                        config.fonts.push(entry.clone());
                     }
                 }
             }

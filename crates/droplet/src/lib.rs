@@ -45,4 +45,4 @@ pub use pattern::Pattern;
 pub use preset::Preset;
 pub use skeleton::FontDirectory;
 pub use state::{ComponentRecord, GuardState, MountedDocument, State};
-pub use store::{FontStore, InstalledFont};
+pub use store::{FontKey, FontStore, InstalledFont};

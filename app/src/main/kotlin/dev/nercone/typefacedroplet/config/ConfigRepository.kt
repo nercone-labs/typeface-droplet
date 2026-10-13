@@ -47,6 +47,20 @@ class ConfigRepository(context: Context) {
     companion object {
         const val FILE = "config.json"
 
+        /**
+         * The family names that earlier versions wrote into the fonts of the roles sans, serif and
+         * mono when the user named none. The engine now names each copy of a font after the family
+         * it replaces (Roboto, Google Sans, Noto Serif, ...), which a fixed name would prevent.
+         */
+        val FORMER_DEFAULT_NAMES = setOf("Roboto", "Noto Serif", "Droid Sans Mono")
+
+        /**
+         * Gives every font the family name the user wrote (`names`). A name the configuration has
+         * from an earlier version stays, unless it is one of the former default names.
+         */
+        fun name(config: Config, names: Map<String, String>): Config =
+            config.copy(fonts = config.fonts.map { entry -> entry.copy(rename = names[entry.id] ?: entry.rename?.takeUnless { it in FORMER_DEFAULT_NAMES }) })
+
         /** Makes `fonts` match the library: new fonts are added, removed fonts dropped, moved fonts updated. */
         fun synchronize(config: Config, library: List<LibraryFont>): Config {
             val known = config.fonts.associateBy { it.id }

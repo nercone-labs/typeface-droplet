@@ -7,16 +7,11 @@ import dev.nercone.typefacedroplet.engine.Preset
 import dev.nercone.typefacedroplet.engine.Role
 import dev.nercone.typefacedroplet.library.LibraryFont
 
-/**
- * A generic family that the recommended configuration replaces, through the role of the same name.
- * `family` is the name the recommended configuration writes into the fonts of the role
- * (`Preset::SANS_NAME` and so on): applications that look fonts up by name, such as Firefox,
- * find the replacement only under the name of the family it replaces.
- */
-enum class Category(val role: String, val family: String) {
-    SANS("sans", "Roboto"),
-    SERIF("serif", "Noto Serif"),
-    MONO("mono", "Droid Sans Mono"),
+/** A generic family that the recommended configuration replaces, through the role of the same name. */
+enum class Category(val role: String) {
+    SANS("sans"),
+    SERIF("serif"),
+    MONO("mono"),
 }
 
 /** A place for one font: a category in one style. */
@@ -87,27 +82,6 @@ data class Selection(val fonts: Map<Slot, String> = emptyMap()) {
                 library.firstOrNull { it.origin == LibraryFont.Origin.BUNDLED && it.name == name }?.let { slot to it.id }
             }.toMap(),
         )
-
-        /**
-         * Names the fonts of a configuration whose roles and rules were edited by hand the way the
-         * recommended configuration names them: a font keeps the name the user wrote (`names`), and
-         * otherwise a font of the role of a category takes the family name of the first such
-         * category. Any other font keeps its name, unless it is one of those family names, which
-         * only this naming gives.
-         *
-         * Without it, the fonts chosen for a role edited by hand kept their own family names:
-         * Firefox, which reads the family names from the font files, then found no Roboto at all
-         * and fell back to the first family of its list, such as Carrois Gothic SC.
-         */
-        fun name(config: Config, names: Map<String, String>): Config {
-            val families = Category.entries.map { it.family }.toSet()
-            return config.copy(
-                fonts = config.fonts.map { entry ->
-                    val category = Category.entries.firstOrNull { category -> config.role(category.role)?.faces?.any { it.font == entry.id } == true }
-                    entry.copy(rename = names[entry.id] ?: category?.family ?: entry.rename?.takeUnless { it in families })
-                },
-            )
-        }
 
         /** The style of a face: its own, or else the style of its font. */
         fun styleOf(face: Face, library: List<LibraryFont>): FaceStyle =
