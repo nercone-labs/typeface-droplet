@@ -97,6 +97,31 @@ class SelectionTest {
     }
 
     @Test
+    fun handEditedConfigurationsNameTheirFontsLikeThePreset() {
+        fun entry(id: String, rename: String? = null) = FontEntry(id, FontSource("/fonts/$id.ttf"), rename = rename)
+        val config = Config(
+            fonts = listOf(entry("a"), entry("i", "Old"), entry("s"), entry("m"), entry("o", "Roboto"), entry("k", "Kept"), entry("n")),
+            roles = listOf(
+                Role("sans", listOf(Face("a"), Face("i", FaceStyle.ITALIC))),
+                Role("serif", listOf(Face("s"))),
+                Role("mono", listOf(Face("m"), Face("a"))),
+                Role("other", listOf(Face("o"), Face("k"))),
+            ),
+        )
+        val named = Selection.name(config, mapOf("s" to "Mine", "n" to "Unused"))
+        val renames = named.fonts.associate { it.id to it.rename }
+        assertEquals("a font of a category takes the family it replaces", "Roboto", renames["a"])
+        assertEquals("even over a name of an earlier version", "Roboto", renames["i"])
+        assertEquals("the name the user wrote wins", "Mine", renames["s"])
+        assertEquals("Droid Sans Mono", renames["m"])
+        assertNull("a font that left its category loses the name of that category", renames["o"])
+        assertEquals("other fonts keep their names", "Kept", renames["k"])
+        assertEquals("Unused", renames["n"])
+        assertEquals(config.copy(fonts = named.fonts), named)
+        assertEquals(listOf("Roboto", "Noto Serif", "Droid Sans Mono"), Category.entries.map { it.family })
+    }
+
+    @Test
     fun theRecommendedSelectionUsesTheBundledFonts() {
         val library = Selection.BUNDLED.entries.map { (slot, name) ->
             font("${slot.category.role}-${slot.style}", slot.style == FaceStyle.ITALIC, LibraryFont.Origin.BUNDLED, name)

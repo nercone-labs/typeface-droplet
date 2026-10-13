@@ -63,7 +63,8 @@ class Droplet(context: Context) {
             configs.save(recommended())
             settings.update { it.copy(customized = false) }
         } else {
-            configs.save(ConfigRepository.synchronize(stored, library.fonts.value))
+            val synchronized = ConfigRepository.synchronize(stored, library.fonts.value)
+            configs.save(if (settings.values.value.customized) named(synchronized) else synchronized)
         }
         initialized = true
     }
@@ -97,7 +98,7 @@ class Droplet(context: Context) {
         settings.update { it.copy(names = if (name == null) it.names - id else it.names + (id to name)) }
         configs.update { config ->
             if (settings.values.value.customized) {
-                config.copy(fonts = config.fonts.map { if (it.id == id) it.copy(rename = name) else it })
+                named(config)
             } else {
                 compose(Selection.of(config, library.fonts.value), config)
             }
@@ -110,13 +111,16 @@ class Droplet(context: Context) {
     suspend fun select(slot: Slot, font: String?) = configs.update { config ->
         val fonts = library.fonts.value
         val selection = Selection.of(config, fonts).with(slot, font)
-        if (settings.values.value.customized) selection.applyTo(config, fonts) else compose(selection, config)
+        if (settings.values.value.customized) named(selection.applyTo(config, fonts)) else compose(selection, config)
     }
+
+    /** Names the fonts of a configuration edited by hand, as `compose` names those of the recommended one. */
+    fun named(config: Config): Config = Selection.name(config, settings.values.value.names)
 
     /** Edits roles and rules by hand: from now on, choosing fonts only changes the faces of the roles. */
     suspend fun customize(transform: (Config) -> Config) {
         settings.update { it.copy(customized = true) }
-        configs.update { transform(it) }
+        configs.update { named(transform(it)) }
     }
 
     /** Changes options that do not touch roles and rules. */
