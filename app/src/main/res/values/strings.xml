@@ -148,7 +148,7 @@
     <string name="font_used_by">Used by: %1$s</string>
     <string name="font_missing">Missing font</string>
     <string name="font_rename">Family name written into the font</string>
-    <string name="font_rename_help">Applications that look fonts up by name (such as Firefox) find the font under this name. Left empty, a chosen font takes the name of the family it replaces (Roboto, Noto Serif, Droid Sans Mono), shown in the field.</string>
+    <string name="font_rename_help">Applications that look fonts up by name (such as Firefox) find the font under this name. Left empty, the font is installed once for each family it replaces and takes the name of its original fonts (such as Roboto, Google Sans and Noto Serif).</string>
     <string name="font_remove_title">Remove this font?</string>
     <string name="font_remove_text">The font file is deleted from the library.</string>
     <string name="font_remove_in_use">Fonts in use cannot be removed.</string>

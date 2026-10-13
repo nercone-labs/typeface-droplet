@@ -11,15 +11,44 @@ use sha2::{Digest, Sha256};
 
 use crate::{Config, DropletError, FaceInfo, FontEntry, FontInfo, FontSource, Log, SourceReader};
 
+/// One installed copy of a font: the font id, and the family name written into the copy
+/// (`None` for an unchanged copy of the source).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FontKey {
+    pub id: String,
+    pub family: Option<String>,
+}
+
+impl FontKey {
+    pub fn new(id: impl Into<String>, family: Option<String>) -> FontKey {
+        FontKey { id: id.into(), family }
+    }
+
+    /// The entry of the font with the family name of this copy.
+    pub fn entry(&self, entry: &FontEntry) -> FontEntry {
+        FontEntry { rename: self.family.clone(), ..entry.clone() }
+    }
+}
+
 /// A font file installed in the store, ready to be mounted.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledFont {
     pub id: String,
+    /// The family name written into this copy, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub family: Option<String>,
     pub file_name: String,
     pub path: PathBuf,
     pub index: u32,
     pub face: FaceInfo,
+}
+
+impl InstalledFont {
+    pub fn key(&self) -> FontKey {
+        FontKey::new(self.id.clone(), self.family.clone())
+    }
 }
 
 /// The directory the engine owns: installed fonts, generated documents, state and log.
@@ -216,7 +245,7 @@ impl FontStore {
         let index = entry.index as usize;
         let info = FontInfo::inspect(&FontSource::file(&path)).map_err(|source| DropletError::Font { path: path.clone(), source })?;
         let face = info.faces.into_iter().nth(index).ok_or_else(|| DropletError::Refused(format!("{file_name} has no face {index}")))?;
-        Ok(InstalledFont { id: entry.id.clone(), file_name, path, index: entry.index, face })
+        Ok(InstalledFont { id: entry.id.clone(), family: entry.rename.clone(), file_name, path, index: entry.index, face })
     }
 
     /// Creates the installed file of `entry` from its source and returns its path.

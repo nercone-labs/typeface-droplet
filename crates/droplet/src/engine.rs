@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -5,13 +6,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use android::{ActivityManager, Capability, FontService, PackageManager, ProcessCapabilities, ProcessTable, SystemProperty};
-use fontxml::{Document, Element};
+use fontxml::{Document, Element, Font};
 use mount::{Mount, MountNamespace, MountTable};
 use serde::Serialize;
 
 use crate::{
-    BootHook, Components, Config, Daemon, DocumentKind, DropletError, FontDirectory, FontStore, GenerationReport, Generator, Guard, GuardState, GuardTarget,
-    InstalledFont, Log, MountedDocument, State, SystemDocument,
+    BootHook, Components, Config, Daemon, DocumentKind, DropletError, FontDirectory, FontInfo, FontKey, FontSource, FontStore, GenerationReport, Generator,
+    Guard, GuardState, GuardTarget, InstalledFont, Log, MountedDocument, State, SystemDocument,
 };
 
 /// When a configuration is applied, which decides what the engine does around the mounts.
@@ -321,9 +322,11 @@ impl Engine {
 
         Engine::enter_init_namespace()?;
         let originals = self.originals()?;
-        let installed = self.install_fonts(config, fresh_boot)?;
+        let families = OriginalFamilies::default();
+        let plan = self.plan(config, &originals, &families)?;
+        let installed = self.install_fonts(config, &plan.requested, fresh_boot)?;
         let generation = state.generation + 1;
-        let generated = self.generate(config, &originals, &installed, generation)?;
+        let generated = self.generate(config, &originals, &installed, &families, &plan.primary, generation)?;
         self.add_fonts(&generated, &installed, &mut state)?;
         let server = Guard::system_server().map(|server| server.pid);
         self.mount(&generated, generation, config, &mut state)?;
@@ -358,12 +361,40 @@ impl Engine {
         })
     }
 
-    /// Installs the fonts the configuration uses, by font id. After a boot, before anything
-    /// of the store is mounted again, installed fonts the configuration no longer uses are removed.
-    pub fn install_fonts(&mut self, config: &Config, fresh_boot: bool) -> Result<HashMap<String, InstalledFont>, DropletError> {
+    /// Finds the copies of fonts the documents need, without installing anything: the
+    /// documents are generated once to learn the family each role replaces first (the
+    /// `primary` family of the role, whose copies its inserted fallback families use), and
+    /// once more to collect every copy.
+    pub fn plan(&mut self, config: &Config, originals: &[SystemDocument], families: &OriginalFamilies) -> Result<FontPlan, DropletError> {
+        let none = HashMap::new();
+        let mut primary: HashMap<String, Option<String>> = HashMap::new();
+        let mut requested = BTreeSet::new();
+        for pass in 0..2 {
+            requested.clear();
+            for original in originals {
+                let kind = original.kind;
+                let document = Document::parse(original.text.as_str()).map_err(|source| DropletError::Document { path: kind.path().to_path_buf(), source })?;
+                let family_of = |font: &Font| families.family(kind, font);
+                let mut generator = Generator::new(kind, Engine::api(), config, &none).with_families(&family_of).with_primary(primary.clone());
+                document.transform(&mut generator);
+                if pass == 0 {
+                    for (role, family) in generator.role_families {
+                        primary.entry(role).or_insert(family);
+                    }
+                }
+                requested.extend(generator.report.requested);
+            }
+        }
+        Ok(FontPlan { requested, primary })
+    }
+
+    /// Installs the copies of fonts the documents need. After a boot, before anything of the
+    /// store is mounted again, installed fonts the configuration no longer uses are removed.
+    pub fn install_fonts(&mut self, config: &Config, requested: &BTreeSet<FontKey>, fresh_boot: bool) -> Result<HashMap<FontKey, InstalledFont>, DropletError> {
         let mut installed = HashMap::new();
-        for entry in config.used_fonts() {
-            installed.insert(entry.id.clone(), self.store.install(entry, &mut self.log)?);
+        for key in requested {
+            let Some(entry) = config.font(&key.id) else { continue };
+            installed.insert(key.clone(), self.store.install(&key.entry(entry), &mut self.log)?);
         }
         if fresh_boot {
             let keep: HashSet<String> = installed.values().map(|font| font.file_name.clone()).collect();
@@ -377,7 +408,9 @@ impl Engine {
         &mut self,
         config: &Config,
         originals: &[SystemDocument],
-        installed: &HashMap<String, InstalledFont>,
+        installed: &HashMap<FontKey, InstalledFont>,
+        families: &OriginalFamilies,
+        primary: &HashMap<String, Option<String>>,
         generation: u64,
     ) -> Result<Vec<GeneratedDocument>, DropletError> {
         let api = Engine::api();
@@ -387,7 +420,8 @@ impl Engine {
         for original in originals {
             let kind = original.kind;
             let document = Document::parse(original.text.as_str()).map_err(|source| DropletError::Document { path: kind.path().to_path_buf(), source })?;
-            let mut generator = Generator::new(kind, api, config, installed);
+            let family_of = |font: &Font| families.family(kind, font);
+            let mut generator = Generator::new(kind, api, config, installed).with_families(&family_of).with_primary(primary.clone());
             let output = generator.generate(&document).map_err(|reason| DropletError::Generation { path: kind.path().to_path_buf(), reason })?;
             let path = directory.join(kind.file_name());
             if let Err(error) = self.store.write(&path, output.as_bytes(), original.label.as_deref()) {
@@ -407,7 +441,7 @@ impl Engine {
     }
 
     /// Adds the installed fonts to the font directories the documents refer to.
-    pub fn add_fonts(&mut self, generated: &[GeneratedDocument], installed: &HashMap<String, InstalledFont>, state: &mut State) -> Result<(), DropletError> {
+    pub fn add_fonts(&mut self, generated: &[GeneratedDocument], installed: &HashMap<FontKey, InstalledFont>, state: &mut State) -> Result<(), DropletError> {
         for document in generated {
             if document.report.files.is_empty() {
                 continue;
@@ -772,5 +806,34 @@ impl Engine {
             documents: DocumentKind::ALL.into_iter().filter(|kind| kind.path().exists()).collect(),
             hook: BootHook::current(),
         })
+    }
+}
+
+/// The copies of fonts that the documents of a configuration need.
+pub struct FontPlan {
+    pub requested: BTreeSet<FontKey>,
+    /// The family name of the copies each role uses in inserted fallback families, by role name.
+    pub primary: HashMap<String, Option<String>>,
+}
+
+/// The family names of the original fonts of the system documents, read from their `name`
+/// tables (the typographic family, otherwise the legacy family, as Firefox reads them) and
+/// remembered by path and face index.
+#[derive(Default)]
+pub struct OriginalFamilies {
+    names: RefCell<HashMap<(PathBuf, u32), Option<String>>>,
+}
+
+impl OriginalFamilies {
+    pub fn family(&self, kind: DocumentKind, font: &Font) -> Option<String> {
+        let index = font.attributes.get(Font::INDEX).and_then(|value| value.trim().parse().ok()).unwrap_or(0u32);
+        let path = kind.font_directory().join(&font.file);
+        self.names
+            .borrow_mut()
+            .entry((path, index))
+            .or_insert_with_key(|(path, index)| {
+                FontInfo::inspect(&FontSource::file(path)).ok().and_then(|info| info.faces.into_iter().nth(*index as usize)).and_then(|face| face.family)
+            })
+            .clone()
     }
 }

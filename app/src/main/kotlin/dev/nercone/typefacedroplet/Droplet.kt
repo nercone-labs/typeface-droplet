@@ -63,7 +63,7 @@ class Droplet(context: Context) {
             configs.save(recommended())
             settings.update { it.copy(customized = false) }
         } else {
-            configs.save(ConfigRepository.synchronize(stored, library.fonts.value))
+            configs.save(ConfigRepository.name(ConfigRepository.synchronize(stored, library.fonts.value), settings.values.value.names))
         }
         initialized = true
     }

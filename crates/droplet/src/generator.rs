@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use fontxml::{Axis, Document, Edit, Element, Family, FamilyList, Font, Item, Transformer};
 use serde::Serialize;
 
-use crate::{Action, Config, DocumentKind, FaceStyle, FallbackEntry, FontStore, InstalledFont, Matcher, Role, Rule};
+use crate::{Action, Config, DocumentKind, FaceStyle, FallbackEntry, FontKey, FontStore, InstalledFont, Matcher, Role, Rule};
 
 /// What a generation changed in one document.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -16,16 +16,32 @@ pub struct GenerationReport {
     pub inserted: Vec<(String, Vec<String>)>,
     /// The file names of the installed fonts the document refers to.
     pub files: BTreeSet<String>,
+    /// The copies of fonts the document needs, whether or not they are installed.
+    #[serde(skip)]
+    pub requested: BTreeSet<FontKey>,
 }
 
 /// Generates a font configuration document from an original one, applying the rules of a
 /// configuration. It implements `fontxml::Transformer`.
+///
+/// Applications that look fonts up by the family names of the font files (such as Firefox,
+/// which takes them from the `name` table) find a replaced family only under the name of
+/// its original fonts. So the fonts of a role replacing a family are copies that carry the
+/// family name of the original fonts of that family (Roboto, Google Sans, Noto Serif, ...),
+/// unless the configuration names the font itself. Fonts of an inserted fallback family use
+/// the copies of the first family their role replaces (`primary`), so they need no copy of their own.
 pub struct Generator<'a> {
     pub kind: DocumentKind,
     pub api: u32,
     pub config: &'a Config,
-    /// Installed fonts by font id.
-    pub fonts: &'a HashMap<String, InstalledFont>,
+    /// Installed copies of fonts.
+    pub fonts: &'a HashMap<FontKey, InstalledFont>,
+    /// The family name of an original `<font>` of the document, if it can be read.
+    pub families: &'a dyn Fn(&Font) -> Option<String>,
+    /// The family name of the copies a role uses in inserted fallback families, by role name.
+    pub primary: HashMap<String, Option<String>>,
+    /// The family name of the copies of the first family each role replaced, by role name.
+    pub role_families: HashMap<String, Option<String>>,
     used_prepends: HashSet<usize>,
     pub report: GenerationReport,
 }
@@ -34,8 +50,50 @@ impl<'a> Generator<'a> {
     /// The weights a variable font is expanded to when the document cannot use `supportedAxes`.
     pub const WEIGHTS: [u16; 9] = [100, 200, 300, 400, 500, 600, 700, 800, 900];
 
-    pub fn new(kind: DocumentKind, api: u32, config: &'a Config, fonts: &'a HashMap<String, InstalledFont>) -> Generator<'a> {
-        Generator { kind, api, config, fonts, used_prepends: HashSet::new(), report: GenerationReport::default() }
+    pub fn new(kind: DocumentKind, api: u32, config: &'a Config, fonts: &'a HashMap<FontKey, InstalledFont>) -> Generator<'a> {
+        Generator {
+            kind,
+            api,
+            config,
+            fonts,
+            families: &Generator::no_family,
+            primary: HashMap::new(),
+            role_families: HashMap::new(),
+            used_prepends: HashSet::new(),
+            report: GenerationReport::default(),
+        }
+    }
+
+    pub fn with_families(mut self, families: &'a dyn Fn(&Font) -> Option<String>) -> Generator<'a> {
+        self.families = families;
+        self
+    }
+
+    pub fn with_primary(mut self, primary: HashMap<String, Option<String>>) -> Generator<'a> {
+        self.primary = primary;
+        self
+    }
+
+    pub fn no_family(_: &Font) -> Option<String> {
+        None
+    }
+
+    /// The family name of the original fonts of an element: that of its first font whose name can be read.
+    pub fn original_family(&self, element: &Element) -> Option<String> {
+        element.fonts().iter().find_map(|font| (self.families)(font)).filter(|name| Config::is_valid_name(name))
+    }
+
+    /// The copy of a font that a family named `family` uses: the name the configuration gives
+    /// the font wins over `family`.
+    pub fn key(&self, font: &str, family: Option<&str>) -> Option<FontKey> {
+        let entry = self.config.font(font)?;
+        Some(FontKey::new(entry.id.clone(), entry.rename.clone().or_else(|| family.map(str::to_string))))
+    }
+
+    /// Records the copies the faces of a role need for a family named `family`.
+    pub fn request(&mut self, role: &Role, family: Option<&str>) {
+        let keys: Vec<FontKey> = role.faces.iter().filter_map(|face| self.key(&face.font, family)).collect();
+        self.report.requested.extend(keys);
     }
 
     /// Generates the document and checks the result. Returns the generated text.
@@ -107,7 +165,7 @@ impl<'a> Generator<'a> {
         self.config.role(name)
     }
 
-    /// The `<font>` elements of a role.
+    /// The `<font>` elements of a role, using the copies for a family named `family`.
     ///
     /// - When the document understands `supportedAxes`, and the faces form a variable family
     ///   that `SystemFonts.resolveVarFamilyType` accepts (one face variable in `wght`, or two
@@ -120,8 +178,8 @@ impl<'a> Generator<'a> {
     ///   A weight class outside 1 to 1000, which the framework rejects, becomes 400.
     /// - Fixed axes apply to the axes the font has, clamped to their range, and are written
     ///   with the four-character tag of the font.
-    pub fn role_fonts(&self, role: &Role, fallback_for: Option<&str>) -> Vec<Font> {
-        let faces: Vec<_> = role.faces.iter().filter_map(|face| Some((face, self.fonts.get(&face.font)?))).collect();
+    pub fn role_fonts(&self, role: &Role, fallback_for: Option<&str>, family: Option<&str>) -> Vec<Font> {
+        let faces: Vec<_> = role.faces.iter().filter_map(|face| Some((face, self.fonts.get(&self.key(&face.font, family)?)?))).collect();
         // A face with an ital axis and no explicit style is an upright font that also covers italic.
         let style_of = |face: &crate::Face, font: &InstalledFont| {
             face.style.unwrap_or(if font.face.italic && font.face.italic_axis().is_none() { FaceStyle::Italic } else { FaceStyle::Normal })
@@ -220,7 +278,10 @@ impl<'a> Generator<'a> {
     }
 
     pub fn replace(&mut self, item: &Item, role: &Role) -> Edit {
-        let fonts = self.role_fonts(role, None);
+        let family = self.original_family(&item.element);
+        self.request(role, family.as_deref());
+        self.role_families.entry(role.name.clone()).or_insert_with(|| family.clone());
+        let fonts = self.role_fonts(role, None, family.as_deref());
         if fonts.is_empty() {
             return Edit::Keep;
         }
@@ -246,7 +307,9 @@ impl<'a> Generator<'a> {
         let mut roles = Vec::new();
         for entry in entries {
             if let Some(role) = self.role(&entry.role) {
-                fonts.extend(self.role_fonts(role, entry.fallback_for.as_deref()));
+                let family = self.primary.get(&role.name).cloned().flatten();
+                self.request(role, family.as_deref());
+                fonts.extend(self.role_fonts(role, entry.fallback_for.as_deref(), family.as_deref()));
                 roles.push(role.name.clone());
             }
         }
