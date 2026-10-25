@@ -62,8 +62,8 @@ android {
         applicationId = "dev.nercone.typefacedroplet"
         minSdk = 33
         targetSdk = 37
-        versionCode = 300
-        versionName = "0.3.0"
+        versionCode = 301
+        versionName = "0.3.1"
     }
 
     buildTypes {

@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "android"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "rustix",
 ]
@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "droplet"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "android",
  "fontxml",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "fontxml"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "quick-xml",
 ]
@@ -139,7 +139,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mount"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "rustix",
 ]
@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "sfnt"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "sha2"
