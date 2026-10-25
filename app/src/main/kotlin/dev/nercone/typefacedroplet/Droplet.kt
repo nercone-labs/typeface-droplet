@@ -20,6 +20,7 @@ import dev.nercone.typefacedroplet.engine.StatusReport
 import dev.nercone.typefacedroplet.library.FontLibrary
 import dev.nercone.typefacedroplet.library.LibraryFont
 import dev.nercone.typefacedroplet.privilege.Privilege
+import dev.nercone.typefacedroplet.privilege.PrivilegeChoice
 import dev.nercone.typefacedroplet.privilege.PrivilegeException
 import dev.nercone.typefacedroplet.privilege.PrivilegeSelection
 import dev.nercone.typefacedroplet.privilege.PrivilegeSelector
@@ -128,7 +129,21 @@ class Droplet(context: Context) {
         settings.update { it.copy(customized = false) }
     }
 
-    suspend fun selectPrivilege(): PrivilegeSelection = selector.select(settings.values.value.privilege)
+    /**
+     * Chooses the privilege. With `interactive`, a missing permission is asked for while the
+     * user is here, once: Shizuku keeps no refusal, so a declined permission is remembered and
+     * not asked for again. Callers that run without the user, such as the boot worker, leave
+     * `interactive` false.
+     */
+    suspend fun selectPrivilege(interactive: Boolean = false): PrivilegeSelection {
+        val values = settings.values.value
+        val selection = selector.select(values.privilege, interactive && !values.permissionDeclined)
+        if (selection.declined) settings.update { it.copy(permissionDeclined = true) }
+        return selection
+    }
+
+    /** Whether the privilege choice may use Shizuku, and a Shizuku binder may arrive. */
+    fun awaitsShizuku(): Boolean = settings.values.value.privilege != PrivilegeChoice.ROOT && shizuku.mayStart()
 
     suspend fun privilege(): Privilege = selectPrivilege().privilege ?: throw PrivilegeException("no privilege can run the engine as root")
 

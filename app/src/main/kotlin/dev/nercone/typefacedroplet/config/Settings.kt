@@ -16,6 +16,11 @@ class Settings(context: Context) {
     /** The preferences, as one immutable value. */
     data class Values(
         val privilege: PrivilegeChoice = PrivilegeChoice.AUTOMATIC,
+        /**
+         * Whether the user declined a permission the application asked for on its own. It is then
+         * asked for only when the user chooses to grant it, until the privilege choice changes.
+         */
+        val permissionDeclined: Boolean = false,
         /** Whether the root manager applies the configuration at every boot, before the framework starts. */
         val bootHook: Boolean = true,
         /** Whether the application applies the configuration after every boot when it is not applied yet. */
@@ -33,6 +38,7 @@ class Settings(context: Context) {
 
     fun read(): Values = Values(
         privilege = preferences.getString(PRIVILEGE, null)?.let { runCatching { PrivilegeChoice.valueOf(it) }.getOrNull() } ?: PrivilegeChoice.AUTOMATIC,
+        permissionDeclined = preferences.getBoolean(PERMISSION_DECLINED, false),
         bootHook = preferences.getBoolean(BOOT_HOOK, true),
         applyAfterBoot = preferences.getBoolean(APPLY_AFTER_BOOT, true),
         applied = preferences.getBoolean(APPLIED, false),
@@ -44,6 +50,7 @@ class Settings(context: Context) {
         val next = transform(values.value)
         preferences.edit {
             putString(PRIVILEGE, next.privilege.name)
+            putBoolean(PERMISSION_DECLINED, next.permissionDeclined)
             putBoolean(BOOT_HOOK, next.bootHook)
             putBoolean(APPLY_AFTER_BOOT, next.applyAfterBoot)
             putBoolean(APPLIED, next.applied)
@@ -56,6 +63,7 @@ class Settings(context: Context) {
     companion object {
         const val NAME = "settings"
         const val PRIVILEGE = "privilege"
+        const val PERMISSION_DECLINED = "permissionDeclined"
         const val BOOT_HOOK = "bootHook"
         const val APPLY_AFTER_BOOT = "applyAtBoot"
         const val APPLIED = "applied"

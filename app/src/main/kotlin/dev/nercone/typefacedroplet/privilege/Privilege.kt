@@ -9,9 +9,16 @@ interface Privilege {
 
     /**
      * Whether commands can be run now, and as which user. A root manager may ask the user to
-     * grant access the first time; Shizuku never prompts here (see `ShizukuPrivilege.requestPermission`).
+     * grant access the first time; Shizuku never prompts here (see `requestPermission`).
      */
     suspend fun status(): PrivilegeStatus
+
+    /**
+     * Asks the user to grant the access that `status` reported as required, and returns the
+     * status afterwards. A root manager asks when `su` runs, so by default this reads the status
+     * again; Shizuku asks with a dialog of its own.
+     */
+    suspend fun requestPermission(): PrivilegeStatus = status()
 
     /**
      * Runs `command` (no shell is involved) and waits for it, up to `timeoutMillis`.

@@ -6,6 +6,7 @@ import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
 import kotlin.coroutines.resume
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
@@ -40,6 +41,10 @@ class ShizukuPrivilege(val context: Context) : Privilege {
         if (Shizuku.isPreV11()) {
             return PrivilegeStatus.Unavailable(PrivilegeStatus.Reason.OUTDATED)
         }
+        // Shizuku tells its user when this application attaches, so a Shizuku started through
+        // ADB is known before the user is asked for a permission that would not help (-1: unknown yet).
+        val attached = Shizuku.getUid()
+        if (attached != -1 && attached != Privilege.REQUIRED_UID) return PrivilegeStatus.InsufficientUser(attached)
         if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
             return if (Shizuku.shouldShowRequestPermissionRationale()) {
                 PrivilegeStatus.Unavailable(PrivilegeStatus.Reason.DENIED)
@@ -51,18 +56,32 @@ class ShizukuPrivilege(val context: Context) : Privilege {
         return if (uid == Privilege.REQUIRED_UID) PrivilegeStatus.Available(uid) else PrivilegeStatus.InsufficientUser(uid)
     }
 
-    /** Asks the user to grant this application access to Shizuku. Returns whether it was granted. */
-    suspend fun requestPermission(): Boolean = suspendCancellableCoroutine { continuation ->
-        val listener = object : Shizuku.OnRequestPermissionResultListener {
-            override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
-                if (requestCode != REQUEST_CODE) return
-                Shizuku.removeRequestPermissionResultListener(this)
-                if (continuation.isActive) continuation.resume(grantResult == PackageManager.PERMISSION_GRANTED)
+    /**
+     * Asks the user to grant this application access to Shizuku, and returns the status afterwards.
+     * The dialog of Shizuku can close without an answer, and Shizuku can stop meanwhile, so the
+     * answer is awaited until Shizuku stops, or for `PERMISSION_TIMEOUT_MILLIS` at most.
+     */
+    override suspend fun requestPermission(): PrivilegeStatus {
+        if (!Shizuku.pingBinder()) return status()
+        val answered = CompletableDeferred<Unit>()
+        val answer = Shizuku.OnRequestPermissionResultListener { requestCode, _ -> if (requestCode == REQUEST_CODE) answered.complete(Unit) }
+        val dead = Shizuku.OnBinderDeadListener { answered.complete(Unit) }
+        Shizuku.addRequestPermissionResultListener(answer)
+        Shizuku.addBinderDeadListener(dead)
+        try {
+            val asked = try {
+                Shizuku.requestPermission(REQUEST_CODE)
+                true
+            } catch (_: RuntimeException) {
+                // Shizuku stopped before it could ask.
+                false
             }
+            if (asked) withTimeoutOrNull(PERMISSION_TIMEOUT_MILLIS) { answered.await() }
+        } finally {
+            Shizuku.removeRequestPermissionResultListener(answer)
+            Shizuku.removeBinderDeadListener(dead)
         }
-        Shizuku.addRequestPermissionResultListener(listener)
-        continuation.invokeOnCancellation { Shizuku.removeRequestPermissionResultListener(listener) }
-        Shizuku.requestPermission(REQUEST_CODE)
+        return status()
     }
 
     /** Waits until the Shizuku binder is received, for example right after boot. */
@@ -133,6 +152,7 @@ class ShizukuPrivilege(val context: Context) : Privilege {
         const val PROCESS_SUFFIX = "engine"
         const val SERVICE_VERSION = 1
         const val CONNECT_TIMEOUT_MILLIS = 20_000L
+        const val PERMISSION_TIMEOUT_MILLIS = 60_000L
 
         /** Whether Sui provides the Shizuku interface. Set once by `initialize`. */
         var isSui = false

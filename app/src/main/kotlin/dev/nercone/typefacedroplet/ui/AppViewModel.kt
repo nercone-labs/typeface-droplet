@@ -60,7 +60,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         run(Operation.PREPARING) {
             droplet.initialize()
             state.update { it.copy(ready = true) }
-            refreshNow()
+            // Shizuku sends its binder once this application comes to the foreground; choosing
+            // before it arrives would fall back to su.
+            if (droplet.awaitsShizuku()) droplet.shizuku.awaitBinder(SHIZUKU_BINDER_TIMEOUT_MILLIS)
+            refreshNow(interactive = true)
         }
     }
 
@@ -92,14 +95,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    suspend fun refreshNow() {
-        val selection = droplet.selectPrivilege()
+    /**
+     * Reads the privilege and the system. With `interactive`, a missing permission is asked for
+     * while the user is here; without it, no dialog is shown, as after applying the fonts.
+     */
+    suspend fun refreshNow(interactive: Boolean = false) {
+        val selection = droplet.selectPrivilege(interactive)
         state.update { it.copy(privilege = selection) }
         val status = if (selection.privilege != null) droplet.status().value else null
         state.update { it.copy(status = status) }
     }
 
-    fun refresh() = run(Operation.CHECKING) { refreshNow() }
+    fun refresh() = run(Operation.CHECKING) { refreshNow(interactive = true) }
 
     fun apply() = run(Operation.APPLYING) {
         val applied = droplet.apply(boot = false)
@@ -164,7 +171,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun reset() = edit { droplet.reset() }
 
     fun setPrivilegeChoice(choice: PrivilegeChoice) {
-        droplet.settings.update { it.copy(privilege = choice) }
+        droplet.settings.update { it.copy(privilege = choice, permissionDeclined = false) }
         refresh()
     }
 
@@ -179,5 +186,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         const val RENAME_DELAY_MILLIS = 600L
+        const val SHIZUKU_BINDER_TIMEOUT_MILLIS = 2_000L
     }
 }

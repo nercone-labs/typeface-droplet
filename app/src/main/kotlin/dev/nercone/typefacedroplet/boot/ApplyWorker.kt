@@ -12,7 +12,6 @@ import androidx.work.WorkerParameters
 import dev.nercone.typefacedroplet.DropletApplication
 import dev.nercone.typefacedroplet.R
 import dev.nercone.typefacedroplet.engine.ReloadOutcome
-import dev.nercone.typefacedroplet.privilege.PrivilegeChoice
 import dev.nercone.typefacedroplet.ui.MainActivity
 
 /**
@@ -26,8 +25,7 @@ import dev.nercone.typefacedroplet.ui.MainActivity
 class ApplyWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
         val droplet = (applicationContext as DropletApplication).droplet
-        val waitForShizuku = droplet.settings.values.value.privilege != PrivilegeChoice.ROOT && droplet.shizuku.mayStart()
-        if (waitForShizuku && droplet.selectPrivilege().privilege == null) {
+        if (droplet.awaitsShizuku() && droplet.selectPrivilege().privilege == null) {
             droplet.shizuku.awaitBinder(BINDER_TIMEOUT_MILLIS)
         }
         return try {

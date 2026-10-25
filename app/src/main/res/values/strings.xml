@@ -217,7 +217,7 @@
     <string name="settings_privilege_automatic">Automatic</string>
     <string name="settings_privilege_shizuku">Shizuku or Sui only</string>
     <string name="settings_privilege_root">su only</string>
-    <string name="settings_privilege_help">Automatic uses Sui or Shizuku when it runs as root, and su otherwise.</string>
+    <string name="settings_privilege_help">Automatic uses Sui or Shizuku when it runs as root, and su otherwise. When Sui or Shizuku needs access, it is asked for once first.</string>
     <string name="settings_boot">At boot</string>
     <string name="settings_boot_hook">Apply while the system starts</string>
     <string name="settings_boot_hook_help">The root manager applies the fonts at every boot, before the system starts any application. No restart and no soft restart is needed.</string>

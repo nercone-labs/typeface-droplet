@@ -216,7 +216,7 @@
     <string name="settings_privilege_automatic">自動</string>
     <string name="settings_privilege_shizuku">Shizuku または Sui のみ</string>
     <string name="settings_privilege_root">su のみ</string>
-    <string name="settings_privilege_help">自動では、root で動いている Sui か Shizuku を優先し、使えなければ su を使います。</string>
+    <string name="settings_privilege_help">自動では、root で動いている Sui か Shizuku を優先し、使えなければ su を使います。Sui や Shizuku へのアクセスが必要なときは、先に一度だけ許可を求めます。</string>
     <string name="settings_boot">起動時</string>
     <string name="settings_boot_hook">システムの起動中に適用</string>
     <string name="settings_boot_hook_help">root マネージャが起動のたびに、どのアプリよりも先にフォントを適用します。アプリの再起動もソフトリスタートも不要です。</string>
