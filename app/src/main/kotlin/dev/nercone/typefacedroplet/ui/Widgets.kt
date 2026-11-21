@@ -1,13 +1,19 @@
 package dev.nercone.typefacedroplet.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -18,6 +24,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,28 +52,70 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.max
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.nercone.typefacedroplet.R
 
-/** User interface parts shared by the screens. */
+/** User interface parts shared by the screens. Each one is a complete part, with nothing specific to one screen. */
 object Widgets {
     val SCREEN_PADDING = 16.dp
-    val SPACING = 16.dp
+    val SPACING = 8.dp
+
+    /** The width that text and lists stay readable at; wider windows centre the content. */
+    val CONTENT_WIDTH = 720.dp
+
+    /** The width from which a screen may lay its content out in two columns. */
+    val TWO_COLUMNS = 840.dp
+
+    /** The room a screen with a floating action button leaves under its last item. */
+    val FLOATING_BUTTON_ROOM = 88.dp
 
     /** The tone of a notice. */
     enum class Tone { INFORMATION, WARNING, ERROR }
+
+    /**
+     * A screen: a lazy list, centred at `maxWidth` in a wide window, that scrolls from anywhere in
+     * the window. A screen that lays its items out in columns when there is room passes
+     * `columnsWidth`, the width it is centred at instead when the window has room for
+     * `TWO_COLUMNS`; `content` receives the width the list has, to decide. `spacing` is the gap
+     * between items; `bottom` is the room under the last one (more under a floating action button).
+     */
+    @Composable
+    fun Screen(
+        maxWidth: Dp = CONTENT_WIDTH,
+        columnsWidth: Dp? = null,
+        spacing: Dp = SPACING,
+        bottom: Dp = SCREEN_PADDING * 2,
+        content: LazyListScope.(width: Dp) -> Unit,
+    ) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val room = this.maxWidth - SCREEN_PADDING * 2
+            val widest = if (columnsWidth != null && room >= TWO_COLUMNS) columnsWidth else maxWidth
+            val side = max(SCREEN_PADDING, (this.maxWidth - widest) / 2)
+            val width = this.maxWidth - side * 2
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = side, end = side, top = SPACING, bottom = bottom),
+                verticalArrangement = Arrangement.spacedBy(spacing),
+            ) { content(width) }
+        }
+    }
 
     /** The title of a group of items. */
     @Composable
@@ -75,14 +124,30 @@ object Widgets {
             text,
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
-            modifier = modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
+            modifier = modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
         )
+    }
+
+    /** An explanation under a group of items. */
+    @Composable
+    fun Help(text: String, color: Color = secondary) {
+        Text(text, style = MaterialTheme.typography.bodySmall, color = color, modifier = Modifier.padding(horizontal = 16.dp))
     }
 
     /** A group of segmented list items: rounded as a whole, with a small gap between the items. */
     @Composable
     fun Group(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
         Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap), content = content)
+    }
+
+    /** A titled group with an optional explanation under it: the unit every screen is made of. */
+    @Composable
+    fun Section(title: String?, help: String? = null, content: @Composable ColumnScope.() -> Unit) {
+        Column(verticalArrangement = Arrangement.spacedBy(SPACING)) {
+            title?.let { Header(it) }
+            Group(content = content)
+            help?.let { Help(it) }
+        }
     }
 
     /** An item of a group. `index` and `count` decide which corners are rounded. */
@@ -136,14 +201,76 @@ object Widgets {
     /** An item with a radio button; the whole item selects it. */
     @OptIn(ExperimentalMaterial3ExpressiveApi::class)
     @Composable
-    fun RadioItem(index: Int, count: Int, headline: String, supporting: String?, selected: Boolean, onSelect: () -> Unit) {
+    fun RadioItem(index: Int, count: Int, headline: String, supporting: String?, selected: Boolean, enabled: Boolean = true, onSelect: () -> Unit) {
         SegmentedListItem(
             selected = selected,
             onClick = onSelect,
             shapes = ListItemDefaults.segmentedShapes(index, count),
-            leadingContent = { RadioButton(selected = selected, onClick = null) },
+            enabled = enabled,
+            leadingContent = { RadioButton(selected = selected, onClick = null, enabled = enabled) },
             supportingContent = supporting?.let { { Text(it) } },
         ) { Text(headline) }
+    }
+
+    /**
+     * An item that shows the chosen one of `options` and opens a dialog to choose another. The
+     * dialog lists every option with `help` under it, and `description` above them all.
+     */
+    @Composable
+    fun <T> ChoiceItem(
+        index: Int,
+        count: Int,
+        headline: String,
+        options: List<T>,
+        selected: T,
+        describe: @Composable (T) -> String,
+        onSelect: (T) -> Unit,
+        icon: ImageVector? = null,
+        description: String? = null,
+        help: (@Composable (T) -> String?)? = null,
+        enabled: Boolean = true,
+    ) {
+        var open by rememberSaveable { mutableStateOf(false) }
+        Item(index, count, headline, describe(selected), icon, enabled, onClick = { open = true })
+        if (open) ChoiceDialog(headline, description, options, selected, describe, help, onSelect = { onSelect(it); open = false }, onDismiss = { open = false })
+    }
+
+    /** A dialog that picks one of `options`; choosing one closes it. */
+    @Composable
+    fun <T> ChoiceDialog(
+        title: String,
+        description: String?,
+        options: List<T>,
+        selected: T,
+        describe: @Composable (T) -> String,
+        help: (@Composable (T) -> String?)?,
+        onSelect: (T) -> Unit,
+        onDismiss: () -> Unit,
+    ) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(title) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    description?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 8.dp)) }
+                    options.forEach { option ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .selectable(selected = option == selected, role = Role.RadioButton, onClick = { onSelect(option) })
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            RadioButton(selected = option == selected, onClick = null)
+                            Column(Modifier.weight(1f)) {
+                                Text(describe(option), style = MaterialTheme.typography.bodyLarge)
+                                help?.invoke(option)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = secondary) }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+        )
     }
 
     /** A message in a tinted container, with optional actions below it. */
@@ -163,6 +290,110 @@ object Widgets {
                 text?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                 actions?.let { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) { it() } }
             }
+        }
+    }
+
+    /** A dialog that asks to confirm a destructive or far-reaching action. */
+    @Composable
+    fun Confirm(title: String, text: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(title) },
+            text = { Text(text) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onConfirm()
+                    onDismiss()
+                }) { Text(confirm) }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+
+    /** A line of a label and a value, for details. */
+    @Composable
+    fun Field(label: String, value: String, monospace: Boolean = false) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = secondary)
+            Text(
+                value,
+                style = if (monospace) MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace) else MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+
+    /** A surface for content that is not a list item, matching the items of a group. */
+    @Composable
+    fun Panel(index: Int, count: Int, color: Color = MaterialTheme.colorScheme.surface, onClick: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+        val shape = when {
+            count == 1 -> MaterialTheme.shapes.large
+            index == 0 -> MaterialTheme.shapes.large.copy(bottomStart = MaterialTheme.shapes.extraSmall.bottomStart, bottomEnd = MaterialTheme.shapes.extraSmall.bottomEnd)
+            index == count - 1 -> MaterialTheme.shapes.large.copy(topStart = MaterialTheme.shapes.extraSmall.topStart, topEnd = MaterialTheme.shapes.extraSmall.topEnd)
+            else -> MaterialTheme.shapes.extraSmall
+        }
+        Surface(shape = shape, color = color, modifier = Modifier.fillMaxWidth()) {
+            Column(
+                (if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = content,
+            )
+        }
+    }
+
+    /**
+     * An editable list of strings, such as package names. `validate` decides which text can be
+     * added. Each change is told as the one string added or removed, not as a whole new list:
+     * the list shown may be older than the stored one while a change is being saved, and a list
+     * built from it would undo that change.
+     */
+    @Composable
+    fun StringList(items: List<String>, label: String, validate: (String) -> Boolean, onAdd: (String) -> Unit, onRemove: (String) -> Unit) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items.forEach { item ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(item, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    IconButton(onClick = { onRemove(item) }) { Icon(Icons.Default.Close, stringResource(R.string.remove)) }
+                }
+            }
+            var text by rememberSaveable { mutableStateOf("") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(text, { text = it.trim() }, label = { Text(label) }, singleLine = true, modifier = Modifier.weight(1f))
+                IconButton(enabled = validate(text) && text !in items, onClick = {
+                    onAdd(text)
+                    text = ""
+                }) { Icon(Icons.Default.Add, stringResource(R.string.add)) }
+            }
+        }
+    }
+
+    /** An item that shows a list of strings and opens a dialog to edit it (`StringList`). */
+    @Composable
+    fun StringListItem(
+        index: Int,
+        count: Int,
+        headline: String,
+        items: List<String>,
+        label: String,
+        help: String,
+        validate: (String) -> Boolean,
+        onAdd: (String) -> Unit,
+        onRemove: (String) -> Unit,
+        icon: ImageVector? = null,
+    ) {
+        var open by rememberSaveable { mutableStateOf(false) }
+        Item(index, count, headline, if (items.isEmpty()) stringResource(R.string.none) else items.joinToString(", "), icon, onClick = { open = true })
+        if (open) {
+            AlertDialog(
+                onDismissRequest = { open = false },
+                title = { Text(headline) },
+                text = {
+                    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(help, style = MaterialTheme.typography.bodyMedium)
+                        StringList(items, label, validate, onAdd, onRemove)
+                    }
+                },
+                confirmButton = { TextButton(onClick = { open = false }) { Text(stringResource(R.string.done)) } },
+            )
         }
     }
 
@@ -192,7 +423,7 @@ object Widgets {
         }
     }
 
-    /** A row of segmented buttons to pick one of `options`. */
+    /** A row of segmented buttons to pick one of a few `options` with short names. */
     @Composable
     fun <T> Segments(options: List<T>, selected: T, describe: @Composable (T) -> String, onSelect: (T) -> Unit, modifier: Modifier = Modifier) {
         SingleChoiceSegmentedButtonRow(modifier.fillMaxWidth()) {
@@ -206,24 +437,7 @@ object Widgets {
         }
     }
 
-    /** A dialog that asks to confirm a destructive or far-reaching action. */
-    @Composable
-    fun Confirm(title: String, text: String, confirm: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text(title) },
-            text = { Text(text) },
-            confirmButton = {
-                TextButton(onClick = {
-                    onConfirm()
-                    onDismiss()
-                }) { Text(confirm) }
-            },
-            dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
-        )
-    }
-
-    /** A full-screen editor with a close button and a save action. */
+    /** A full-screen editor with a close button and a save action, its content centred at a readable width. */
     @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
     @Composable
     fun Editor(title: String, canSave: Boolean, onSave: () -> Unit, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
@@ -236,7 +450,7 @@ object Widgets {
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                         navigationIcon = { IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.cancel)) } },
                         actions = {
-                            androidx.compose.material3.Button(
+                            Button(
                                 onClick = onSave,
                                 enabled = canSave,
                                 shapes = ButtonDefaults.shapes(),
@@ -246,11 +460,14 @@ object Widgets {
                     )
                 },
             ) { padding ->
-                Column(
-                    Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(SCREEN_PADDING),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    content = content,
-                )
+                BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+                    val side = max(SCREEN_PADDING, (maxWidth - CONTENT_WIDTH) / 2)
+                    Column(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = side, vertical = SCREEN_PADDING),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        content = content,
+                    )
+                }
             }
         }
     }
@@ -268,8 +485,8 @@ object Widgets {
                     IconButton(onClick = { onChange(axes - tag) }) { Icon(Icons.Default.Close, stringResource(R.string.remove)) }
                 }
             }
-            var tag by remember { mutableStateOf("") }
-            var value by remember { mutableStateOf("") }
+            var tag by rememberSaveable { mutableStateOf("") }
+            var value by rememberSaveable { mutableStateOf("") }
             val number = value.toFloatOrNull()
             val valid = tag.length in 1..4 && tag.all { it.code in 0x20..0x7E } && tag != "wght" && tag != "ital" && number != null && number.isFinite()
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -283,30 +500,9 @@ object Widgets {
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(enabled = valid, onClick = {
-                    onChange(axes + (tag to (number ?: 0f)))
+                    number?.let { onChange(axes + (tag to it)) }
                     tag = ""
                     value = ""
-                }) { Icon(Icons.Default.Add, stringResource(R.string.add)) }
-            }
-        }
-    }
-
-    /** An editable list of strings, such as packages or components. */
-    @Composable
-    fun StringList(items: List<String>, label: String, validate: (String) -> Boolean, onChange: (List<String>) -> Unit) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            items.forEach { item ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(item, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    IconButton(onClick = { onChange(items - item) }) { Icon(Icons.Default.Close, stringResource(R.string.remove)) }
-                }
-            }
-            var text by remember { mutableStateOf("") }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(text, { text = it.trim() }, label = { Text(label) }, singleLine = true, modifier = Modifier.weight(1f))
-                IconButton(enabled = validate(text) && text !in items, onClick = {
-                    onChange(items + text)
-                    text = ""
                 }) { Icon(Icons.Default.Add, stringResource(R.string.add)) }
             }
         }

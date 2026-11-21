@@ -9,10 +9,14 @@ import dev.nercone.typefacedroplet.engine.FaceInfo
 import dev.nercone.typefacedroplet.engine.FontInfo
 import dev.nercone.typefacedroplet.engine.FontSource
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -52,7 +56,8 @@ data class LibraryFont(
  */
 class FontLibrary(val context: Context, val engine: Engine) {
     val mutex = Mutex()
-    val fonts = MutableStateFlow<List<LibraryFont>>(emptyList())
+    private val state = MutableStateFlow<List<LibraryFont>>(emptyList())
+    val fonts: StateFlow<List<LibraryFont>> = state
     val directory = File(context.filesDir, DIRECTORY)
     val index = File(context.filesDir, INDEX)
     val serializer = ListSerializer(LibraryFont.serializer())
@@ -79,19 +84,40 @@ class FontLibrary(val context: Context, val engine: Engine) {
                 context.assets.openFd("$ASSET_DIRECTORY/$name").use { descriptor -> FontSource(apk, descriptor.startOffset, descriptor.length) }
             }
             stored.firstOrNull { it.origin == LibraryFont.Origin.BUNDLED && it.name == name && it.source == source }
-                ?: runCatching {
-                    val id = engine.hash(source).value.sha256
-                    LibraryFont(id, source, engine.inspect(source).value, LibraryFont.Origin.BUNDLED, name)
-                }.getOrNull()
+                ?: inspectBundled(source, name)
         }
         val imported = stored.filter { it.origin == LibraryFont.Origin.IMPORTED && File(it.source.path).isFile }
         publish(bundled + imported)
     }
 
-    /** Copies a font chosen by the user into the library. Throws if it is not a font the engine can read. */
+    /**
+     * A bundled font inspected by the engine, or `null` if the engine cannot read it: such a font
+     * is left out of the library rather than making the whole library fail to load.
+     */
+    suspend fun inspectBundled(source: FontSource, name: String): LibraryFont? = try {
+        val id = engine.hash(source).value.sha256
+        LibraryFont(id, source, engine.inspect(source).value, LibraryFont.Origin.BUNDLED, name)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        null
+    }
+
+    /**
+     * Copies a font chosen by the user into the library. Throws if it is not a font the engine
+     * can read; nothing of it is kept then.
+     */
     suspend fun import(uri: Uri, displayName: String): LibraryFont = mutex.withLock {
         withContext(Dispatchers.IO) { directory.mkdirs() }
         val temporary = File(directory, ".import.tmp")
+        try {
+            importLocked(uri, displayName, temporary)
+        } finally {
+            withContext(NonCancellable + Dispatchers.IO) { temporary.delete() }
+        }
+    }
+
+    private suspend fun importLocked(uri: Uri, displayName: String, temporary: File): LibraryFont {
         val id = withContext(Dispatchers.IO) {
             val digest = MessageDigest.getInstance("SHA-256")
             val input = context.contentResolver.openInputStream(uri) ?: throw IllegalArgumentException("cannot open $uri")
@@ -108,23 +134,15 @@ class FontLibrary(val context: Context, val engine: Engine) {
             }
             digest.digest().joinToString("") { "%02x".format(it) }
         }
-        fonts.value.firstOrNull { it.id == id }?.let {
-            temporary.delete()
-            return@withLock it
-        }
-        val info = try {
-            engine.inspect(FontSource(temporary.absolutePath)).value
-        } catch (error: Exception) {
-            temporary.delete()
-            throw error
-        }
+        fonts.value.firstOrNull { it.id == id }?.let { return it }
+        val info = engine.inspect(FontSource(temporary.absolutePath)).value
         val file = File(directory, "$id.${info.format}")
         withContext(Dispatchers.IO) {
-            if (!temporary.renameTo(file)) throw IllegalStateException("cannot store $file")
+            if (!temporary.renameTo(file)) throw IOException("cannot store $file")
         }
         val font = LibraryFont(id, FontSource(file.absolutePath), info, LibraryFont.Origin.IMPORTED, displayName)
         publish(fonts.value + font)
-        font
+        return font
     }
 
     /** Removes an imported font. Bundled fonts cannot be removed. */
@@ -135,12 +153,18 @@ class FontLibrary(val context: Context, val engine: Engine) {
         publish(fonts.value - font)
     }
 
+    /**
+     * Makes `list` the library and stores it. The list is published even when it cannot be
+     * stored: the fonts exist, and the next load finds the bundled ones again; an imported font
+     * whose entry was not stored is then missing until it is imported again.
+     */
     suspend fun publish(list: List<LibraryFont>) {
-        fonts.value = list.sortedWith(ORDER)
+        val sorted = list.sortedWith(ORDER)
+        state.value = sorted
         withContext(Dispatchers.IO) {
             val temporary = File(context.filesDir, "$INDEX.tmp")
-            temporary.writeText(EngineJson.json.encodeToString(serializer, fonts.value))
-            temporary.renameTo(index)
+            temporary.writeText(EngineJson.json.encodeToString(serializer, sorted))
+            if (!temporary.renameTo(index)) throw IOException("cannot save $index")
         }
     }
 

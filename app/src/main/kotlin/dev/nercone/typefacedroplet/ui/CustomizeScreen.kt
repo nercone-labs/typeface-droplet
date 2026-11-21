@@ -3,15 +3,11 @@ package dev.nercone.typefacedroplet.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
@@ -37,18 +33,19 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.nercone.typefacedroplet.R
-import dev.nercone.typefacedroplet.config.Settings
 import dev.nercone.typefacedroplet.engine.Action
 import dev.nercone.typefacedroplet.engine.Config
 import dev.nercone.typefacedroplet.engine.Face
@@ -59,6 +56,7 @@ import dev.nercone.typefacedroplet.engine.Matcher
 import dev.nercone.typefacedroplet.engine.Role
 import dev.nercone.typefacedroplet.engine.Rule
 import dev.nercone.typefacedroplet.library.LibraryFont
+import dev.nercone.typefacedroplet.ui.Notices.notices
 
 /**
  * Roles and rules, edited by hand, and the families of the system they apply to.
@@ -100,22 +98,27 @@ object CustomizeScreen {
     }
 
     @Composable
-    fun Content(ui: UiState, config: Config?, fonts: List<LibraryFont>, settings: Settings.Values, model: AppViewModel, state: State) {
+    fun Content(data: ScreenData, model: AppViewModel, state: State) {
+        val config = data.config
+        val fonts = data.fonts
         Column(Modifier.fillMaxSize()) {
             SecondaryTabRow(selectedTabIndex = state.tab.ordinal, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
                 Tab.entries.forEach { tab ->
                     Tab(selected = state.tab == tab, onClick = { state.tab = tab }, text = { Text(stringResource(tab.title)) })
                 }
             }
-            if (config == null) return@Column
-            LazyColumn(contentPadding = PaddingValues(Widgets.SCREEN_PADDING), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                item { Mode(settings.customized, model) }
+            Widgets.Screen(spacing = 12.dp, bottom = Widgets.FLOATING_BUTTON_ROOM) {
+                notices(data, model)
+                if (config == null) {
+                    item(key = "unavailable") { Widgets.Help(stringResource(if (data.state.ready) R.string.config_unavailable else R.string.loading)) }
+                    return@Screen
+                }
+                item(key = "mode") { Mode(data.settings.customized, model) }
                 when (state.tab) {
                     Tab.ROLES -> roles(config, fonts) { state.role = it }
                     Tab.RULES -> rules(config, model) { state.rule = it }
-                    Tab.SYSTEM -> system(ui, config, model) { state.assign = it }
+                    Tab.SYSTEM -> system(data.state, config, model) { state.assign = it }
                 }
-                item { Spacer(Modifier.height(72.dp)) }
             }
         }
         if (config == null) return
@@ -154,7 +157,7 @@ object CustomizeScreen {
     /** Whether the roles and rules follow the chosen fonts or were edited by hand. */
     @Composable
     fun Mode(customized: Boolean, model: AppViewModel) {
-        var confirm by remember { mutableStateOf(false) }
+        var confirm by rememberSaveable { mutableStateOf(false) }
         if (customized) {
             Widgets.Notice(Widgets.Tone.INFORMATION, stringResource(R.string.customized_title), stringResource(R.string.customized_text)) {
                 TextButton(onClick = { confirm = true }) { Text(stringResource(R.string.reset)) }
@@ -163,18 +166,18 @@ object CustomizeScreen {
             Widgets.Notice(Widgets.Tone.INFORMATION, stringResource(R.string.recommended_title), stringResource(R.string.recommended_text))
         }
         if (confirm) {
-            Widgets.Confirm(stringResource(R.string.reset_title), stringResource(R.string.reset_text), stringResource(R.string.reset), model::reset) { confirm = false }
+            Widgets.Confirm(stringResource(R.string.reset_title), stringResource(R.string.reset_text), stringResource(R.string.reset_confirm), model::reset) { confirm = false }
         }
     }
 
     fun LazyListScope.roles(config: Config, fonts: List<LibraryFont>, onEdit: (String) -> Unit) {
-        if (config.roles.isEmpty()) item { Text(stringResource(R.string.roles_empty), style = MaterialTheme.typography.bodyMedium) }
+        if (config.roles.isEmpty()) item(key = "roles-empty") { Widgets.Help(stringResource(R.string.roles_empty)) }
         itemsIndexed(config.roles, key = { _, role -> "role:${role.name}" }) { index, role ->
             Widgets.Item(
                 index = index,
                 count = config.roles.size,
                 headline = role.name,
-                supporting = (role.faces.map { faceSummary(it, fonts) } + stringResource(R.string.role_used_by, config.rulesUsing(role.name).size)).joinToString("\n"),
+                supporting = (role.faces.map { faceSummary(it, fonts) } + config.rulesUsing(role.name).size.let { pluralStringResource(R.plurals.role_used_by, it, it) }).joinToString("\n"),
                 onClick = { onEdit(role.name) },
             )
         }
@@ -182,12 +185,13 @@ object CustomizeScreen {
 
     @OptIn(ExperimentalMaterial3ExpressiveApi::class)
     fun LazyListScope.rules(config: Config, model: AppViewModel, onEdit: (Int) -> Unit) {
-        item { Text(stringResource(R.string.rules_help), style = MaterialTheme.typography.bodyMedium, color = Widgets.secondary) }
+        item(key = "rules-help") { Widgets.Help(stringResource(R.string.rules_help)) }
+        if (config.rules.isEmpty()) item(key = "rules-empty") { Widgets.Help(stringResource(R.string.rules_empty)) }
         itemsIndexed(config.rules) { index, rule ->
             SegmentedListItem(
                 onClick = { onEdit(index) },
                 shapes = ListItemDefaults.segmentedShapes(index, config.rules.size),
-                supportingContent = { Text(actionText(rule.action)) },
+                supportingContent = { Text(Labels.action(rule.action)) },
                 trailingContent = {
                     Row {
                         IconButton(onClick = { model.customize { it.copy(rules = move(it.rules, index, -1)) } }, enabled = index > 0) {
@@ -198,24 +202,35 @@ object CustomizeScreen {
                         }
                     }
                 },
-            ) { Text("${index + 1}. ${matcherText(rule.match)}") }
+            ) { Text("${index + 1}. ${Labels.matcher(rule.match)}") }
         }
     }
 
+    /**
+     * The named families of the system. They are read when this tab is first shown, apart from
+     * the operations; while they load, and when they could not be read, the tab says so (with a
+     * way to try again) instead of waiting without end.
+     */
     @OptIn(ExperimentalMaterial3ExpressiveApi::class)
     fun LazyListScope.system(ui: UiState, config: Config, model: AppViewModel, onAssign: (String) -> Unit) {
         val families = ui.families
-        if (families == null) {
-            item {
-                LaunchedEffect(ui.privilege?.privilege) { if (ui.privilege?.privilege != null) model.loadFamilies() }
-                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    if (ui.privilege?.privilege == null) Text(stringResource(R.string.families_need_privilege)) else LoadingIndicator(Modifier.size(64.dp))
+        val list = families.list
+        if (list == null) {
+            item(key = "families-state") {
+                val privileged = ui.privilege?.privilege != null
+                LaunchedEffect(privileged, families) { if (privileged) model.loadFamilies() }
+                when {
+                    !privileged -> Widgets.Help(stringResource(R.string.families_need_privilege))
+                    families.error != null -> Widgets.Notice(Widgets.Tone.ERROR, stringResource(R.string.families_failed), families.error) {
+                        TextButton(onClick = model::retryFamilies) { Text(stringResource(R.string.try_again)) }
+                    }
+                    else -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { LoadingIndicator(Modifier.size(64.dp)) }
                 }
             }
             return
         }
-        item { Text(stringResource(R.string.families_help), style = MaterialTheme.typography.bodyMedium, color = Widgets.secondary) }
-        val named = families.filter { it.element != "alias" && it.name != null }.groupBy { it.name!! }
+        item(key = "families-help") { Widgets.Help(stringResource(R.string.families_help)) }
+        val named = list.filter { it.element != "alias" && it.name != null }.groupBy { it.name!! }
         val names = named.keys.sorted()
         itemsIndexed(names, key = { _, name -> "family:$name" }) { index, name ->
             val infos = named.getValue(name)
@@ -224,7 +239,7 @@ object CustomizeScreen {
                 index = index,
                 count = names.size,
                 headline = name,
-                supporting = listOf(infos.flatMap { it.files }.distinct().joinToString(), rule?.let { actionText(it.action) } ?: stringResource(R.string.families_unchanged))
+                supporting = listOf(infos.flatMap { it.files }.distinct().joinToString(), rule?.let { Labels.action(it.action) } ?: stringResource(R.string.families_unchanged))
                     .joinToString("\n"),
                 onClick = { onAssign(name) },
             )
@@ -240,22 +255,9 @@ object CustomizeScreen {
     @Composable
     fun faceSummary(face: Face, fonts: List<LibraryFont>): String {
         val name = fonts.firstOrNull { it.id == face.font }?.label ?: stringResource(R.string.font_missing)
-        val style = face.style?.let { stringResource(FontsScreen.styleName(it)) } ?: stringResource(R.string.style_automatic)
+        val style = Labels.faceStyle(face.style)
         val weight = face.weight?.let { stringResource(R.string.face_weight_fixed, it) }
         return listOfNotNull(name, style, weight).joinToString(" · ")
-    }
-
-    @Composable
-    fun matcherText(matcher: Matcher): String = when (matcher) {
-        is Matcher.Family -> stringResource(R.string.match_family_text, matcher.pattern)
-        is Matcher.File -> stringResource(R.string.match_file_text, matcher.pattern)
-        is Matcher.Language -> stringResource(R.string.match_language_text, matcher.pattern)
-    }
-
-    @Composable
-    fun actionText(action: Action): String = when (action) {
-        is Action.Replace -> stringResource(R.string.action_replace_text, action.role)
-        is Action.Prepend -> stringResource(R.string.action_prepend_text, action.entries.joinToString { entry -> entry.fallbackFor?.let { "${entry.role} ($it)" } ?: entry.role })
     }
 
     /** Whether `matcher` matches the named family `family`, as the engine decides it (wildcards `*` and `?`). */
@@ -288,7 +290,7 @@ object CustomizeScreen {
         var name by remember { mutableStateOf(original?.name.orEmpty()) }
         var faces by remember { mutableStateOf(original?.faces.orEmpty()) }
         var axes by remember { mutableStateOf(original?.axes.orEmpty()) }
-        var confirm by remember { mutableStateOf(false) }
+        var confirm by rememberSaveable { mutableStateOf(false) }
         val valid = name.isNotBlank() && name.trim().length <= Config.MAX_NAME_LENGTH && name.trim() !in existing && faces.isNotEmpty()
         Widgets.Editor(stringResource(if (original == null) R.string.role_new else R.string.role_edit), valid, { onSave(Role(name.trim(), faces, axes)) }, onDismiss) {
             OutlinedTextField(
@@ -336,7 +338,7 @@ object CustomizeScreen {
             Widgets.Segments(
                 options = listOf(null, FaceStyle.NORMAL, FaceStyle.ITALIC),
                 selected = face.style,
-                describe = { style -> style?.let { stringResource(FontsScreen.styleName(it)) } ?: stringResource(R.string.style_automatic) },
+                describe = { Labels.faceStyle(it) },
                 onSelect = { onChange(face.copy(style = it)) },
             )
             var weight by remember(face) { mutableStateOf(face.weight?.toString().orEmpty()) }
@@ -379,15 +381,7 @@ object CustomizeScreen {
             Widgets.Segments(
                 options = listOf(Matcher.FAMILY, Matcher.FILE, Matcher.LANGUAGE),
                 selected = kind,
-                describe = {
-                    stringResource(
-                        when (it) {
-                            Matcher.FAMILY -> R.string.match_family
-                            Matcher.FILE -> R.string.match_file
-                            else -> R.string.match_language
-                        },
-                    )
-                },
+                describe = { Labels.matcherKind(it) },
                 onSelect = { kind = it },
             )
             OutlinedTextField(

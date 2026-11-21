@@ -1,9 +1,11 @@
 package dev.nercone.typefacedroplet.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -16,10 +18,12 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FontDownload
 import androidx.compose.material.icons.filled.Home
@@ -34,28 +38,32 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ShortNavigationBar
 import androidx.compose.material3.ShortNavigationBarItem
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarState
+import androidx.compose.material3.WideNavigationRail
+import androidx.compose.material3.WideNavigationRailItem
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -71,7 +79,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** The application frame: top bar, navigation bar, floating action button and the screen of the destination. */
+/**
+ * The application frame: the top bar, the navigation (a bar at the bottom of a narrow window, a
+ * rail at the side of a wide one), the floating action button and the screen of the
+ * destination. The frame also owns what any screen can open: the engine log, the restricted-root
+ * dialog and the file picker of fonts.
+ */
 object DropletApp {
     enum class Destination(val title: Int, val selectedIcon: ImageVector, val icon: ImageVector) {
         HOME(R.string.tab_home, Icons.Filled.Home, Icons.Outlined.Home),
@@ -79,6 +92,17 @@ object DropletApp {
         CUSTOMIZE(R.string.tab_customize, Icons.Filled.Tune, Icons.Outlined.Tune),
         SETTINGS(R.string.tab_settings, Icons.Filled.Settings, Icons.Outlined.Settings),
     }
+
+    /** Where the user is: a destination, and the page of the settings when one is open. */
+    data class Route(val destination: Destination, val page: SettingsScreen.Page?)
+
+    /** Opens `destination`, at `page` when it is the settings. */
+    fun interface Navigator {
+        fun open(destination: Destination, page: SettingsScreen.Page?)
+    }
+
+    /** The window width from which the navigation is a rail at the side. */
+    val RAIL_WIDTH = 600.dp
 
     /** The MIME types offered when importing a font. */
     val FONT_TYPES = arrayOf("font/*", "application/font-sfnt", "application/x-font-ttf", "application/x-font-otf", "application/vnd.ms-opentype", "application/octet-stream")
@@ -90,93 +114,161 @@ object DropletApp {
         val config by model.config.collectAsStateWithLifecycle()
         val fonts by model.fonts.collectAsStateWithLifecycle()
         val settings by model.settings.collectAsStateWithLifecycle()
+        val data = remember(state, config, fonts, settings) { ScreenData(state, config, fonts, settings) }
         var destination by rememberSaveable { mutableStateOf(Destination.HOME) }
+        var page by rememberSaveable { mutableStateOf<SettingsScreen.Page?>(null) }
+        val route = Route(destination, page.takeIf { destination == Destination.SETTINGS })
+        // Choosing a destination opens it at its start (the list of the settings, also when it
+        // is chosen again from one of its pages); a shortcut may open a page of the settings.
+        val navigator = Navigator { target, targetPage ->
+            page = targetPage.takeIf { target == Destination.SETTINGS }
+            destination = target
+        }
+        // Back leaves a page of the settings first, then returns to the home screen, and only
+        // from there leaves the application.
+        BackHandler(enabled = route.page != null) { page = null }
+        BackHandler(enabled = route.page == null && destination != Destination.HOME) { navigator.open(Destination.HOME, null) }
+
         val customize = remember { CustomizeScreen.State() }
-        val snackbar = remember { SnackbarHostState() }
+        val context = LocalContext.current
         val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(model::importFont) }
+        val import = {
+            // A system without a documents application has no activity for this request.
+            try {
+                importer.launch(FONT_TYPES)
+            } catch (error: ActivityNotFoundException) {
+                model.fail(context.getString(R.string.no_file_picker))
+            }
+        }
+        NotificationRequest(data, model)
+
+        val window = LocalWindowInfo.current.containerSize
+        val wide = with(LocalDensity.current) { window.width.toDp() } >= RAIL_WIDTH
+        // Each route has its own top bar state, so that a screen always opens with the bar expanded.
+        val barState = rememberSaveable(route, saver = TopAppBarState.Saver) { TopAppBarState(-Float.MAX_VALUE, 0f, 0f) }
+        val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(barState)
+        val enter = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+        val exit = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+
+        Row(Modifier.fillMaxSize()) {
+            if (wide) Rail(destination) { navigator.open(it, null) }
+            Scaffold(
+                modifier = Modifier.weight(1f).nestedScroll(scrollBehavior.nestedScrollConnection),
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                topBar = {
+                    Column {
+                        LargeFlexibleTopAppBar(
+                            title = { Text(title(route)) },
+                            subtitle = state.operation?.let { { Text(Labels.operation(it)) } },
+                            navigationIcon = {
+                                if (route.page != null) {
+                                    IconButton(onClick = { page = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) }
+                                }
+                            },
+                            scrollBehavior = scrollBehavior,
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            ),
+                        )
+                        if (state.operation != null) LinearWavyProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = Widgets.SCREEN_PADDING))
+                    }
+                },
+                bottomBar = { if (!wide) Bar(destination) { navigator.open(it, null) } },
+                floatingActionButton = {
+                    when (destination) {
+                        Destination.FONTS -> ExtendedFloatingActionButton(
+                            onClick = import,
+                            icon = { Icon(Icons.Default.Add, null) },
+                            text = { Text(stringResource(R.string.fonts_import)) },
+                            expanded = scrollBehavior.state.collapsedFraction < 0.5f,
+                        )
+                        Destination.CUSTOMIZE -> CustomizeScreen.FloatingButton(customize, config != null)
+                        else -> Unit
+                    }
+                },
+            ) { padding ->
+                AnimatedContent(
+                    targetState = route,
+                    transitionSpec = { fadeIn(enter) togetherWith fadeOut(exit) },
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                    label = "route",
+                ) { shown ->
+                    Box(Modifier.fillMaxSize()) {
+                        when (shown.destination) {
+                            Destination.HOME -> HomeScreen.Content(data, model, navigator)
+                            Destination.FONTS -> FontsScreen.Content(data, model)
+                            Destination.CUSTOMIZE -> CustomizeScreen.Content(data, model, customize)
+                            Destination.SETTINGS -> SettingsScreen.Content(data, model, shown.page) { page = it }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (state.logShown) Notices.Log(state.log) { model.showLog(false) }
+        (state.outcome as? Outcome.Failed)?.takeIf { it.restricted }?.let {
+            Restricted(it, onRecheck = { model.dismissOutcome(); model.recheck() }, onDismiss = model::dismissOutcome)
+        }
+    }
+
+    @Composable
+    fun title(route: Route): String = when {
+        route.page != null -> stringResource(route.page.title)
+        route.destination == Destination.HOME -> stringResource(R.string.app_name)
+        else -> stringResource(route.destination.title)
+    }
+
+    @Composable
+    fun Bar(destination: Destination, onNavigate: (Destination) -> Unit) {
+        ShortNavigationBar {
+            Destination.entries.forEach { entry ->
+                val selected = destination == entry
+                ShortNavigationBarItem(
+                    selected = selected,
+                    onClick = { onNavigate(entry) },
+                    icon = { Icon(if (selected) entry.selectedIcon else entry.icon, null) },
+                    label = { Text(stringResource(entry.title)) },
+                )
+            }
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    @Composable
+    fun Rail(destination: Destination, onNavigate: (Destination) -> Unit) {
+        WideNavigationRail(arrangement = Arrangement.Center) {
+            Destination.entries.forEach { entry ->
+                val selected = destination == entry
+                WideNavigationRailItem(
+                    railExpanded = false,
+                    selected = selected,
+                    onClick = { onNavigate(entry) },
+                    icon = { Icon(if (selected) entry.selectedIcon else entry.icon, null) },
+                    label = { Text(stringResource(entry.title)) },
+                )
+            }
+        }
+    }
+
+    /**
+     * Asks for the notification permission once, after the fonts are first applied:
+     * notifications report failures of the application after a boot, which only happens from
+     * then on.
+     */
+    @Composable
+    fun NotificationRequest(data: ScreenData, model: AppViewModel) {
         val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         val context = LocalContext.current
-        val outcome = state.outcome
-
-        // Notifications only matter once fonts are applied: they report problems after a boot.
+        val outcome = data.state.outcome
         LaunchedEffect(outcome) {
-            if (outcome is Outcome.Applied && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            if (outcome is Outcome.Applied && !data.settings.notificationsAsked &&
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                model.setNotificationsAsked()
                 notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-        // The home screen shows outcomes itself; elsewhere a failure appears as a snackbar.
-        val failure = (outcome as? Outcome.Failed)?.takeIf { !it.restricted && destination != Destination.HOME }
-        LaunchedEffect(failure) {
-            failure?.let {
-                snackbar.showSnackbar(it.text, withDismissAction = true)
-                model.dismissOutcome()
-            }
-        }
-
-        val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-        val enter = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
-        val exit = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
-        Scaffold(
-            modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            topBar = {
-                Column {
-                    LargeFlexibleTopAppBar(
-                        title = { Text(stringResource(if (destination == Destination.HOME) R.string.app_name else destination.title)) },
-                        subtitle = state.operation?.let { { Text(operationText(it)) } },
-                        scrollBehavior = scrollBehavior,
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        ),
-                    )
-                    if (state.operation != null) LinearWavyProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = Widgets.SCREEN_PADDING))
-                }
-            },
-            bottomBar = {
-                ShortNavigationBar {
-                    Destination.entries.forEach { entry ->
-                        val selected = destination == entry
-                        ShortNavigationBarItem(
-                            selected = selected,
-                            onClick = { destination = entry },
-                            icon = { Icon(if (selected) entry.selectedIcon else entry.icon, null) },
-                            label = { Text(stringResource(entry.title)) },
-                        )
-                    }
-                }
-            },
-            floatingActionButton = {
-                when (destination) {
-                    Destination.FONTS -> ExtendedFloatingActionButton(
-                        onClick = { importer.launch(FONT_TYPES) },
-                        icon = { Icon(Icons.Default.Add, null) },
-                        text = { Text(stringResource(R.string.fonts_import)) },
-                        expanded = scrollBehavior.state.collapsedFraction < 0.5f,
-                    )
-                    Destination.CUSTOMIZE -> CustomizeScreen.FloatingButton(customize, config != null)
-                    else -> {}
-                }
-            },
-            snackbarHost = { SnackbarHost(snackbar) },
-        ) { padding ->
-            AnimatedContent(
-                targetState = destination,
-                transitionSpec = { fadeIn(enter) togetherWith fadeOut(exit) },
-                modifier = Modifier.fillMaxSize().padding(padding),
-                label = "destination",
-            ) { shown ->
-                Box(Modifier.fillMaxSize()) {
-                    when (shown) {
-                        Destination.HOME -> HomeScreen.Content(state, config, fonts, settings, model) { destination = it }
-                        Destination.FONTS -> FontsScreen.Content(state, config, fonts, settings, model)
-                        Destination.CUSTOMIZE -> CustomizeScreen.Content(state, config, fonts, settings, model, customize)
-                        Destination.SETTINGS -> SettingsScreen.Content(state, config, settings, model)
-                    }
-                }
-            }
-        }
-        (outcome as? Outcome.Failed)?.takeIf { it.restricted }?.let { Restricted(it, onRecheck = { model.dismissOutcome(); model.refresh() }, onDismiss = model::dismissOutcome) }
     }
 
     /** Explains that the root manager restricts root, and how to grant it fully. */
@@ -195,18 +287,4 @@ object DropletApp {
             dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.dismiss)) } },
         )
     }
-
-    @Composable
-    fun operationText(operation: Operation): String = stringResource(
-        when (operation) {
-            Operation.PREPARING -> R.string.operation_preparing
-            Operation.CHECKING -> R.string.operation_checking
-            Operation.APPLYING -> R.string.operation_applying
-            Operation.REVERTING -> R.string.operation_reverting
-            Operation.RESTARTING -> R.string.operation_restarting
-            Operation.IMPORTING -> R.string.operation_importing
-            Operation.LOADING_FAMILIES -> R.string.operation_loading_families
-            Operation.CONFIGURING_BOOT -> R.string.operation_configuring_boot
-        },
-    )
 }

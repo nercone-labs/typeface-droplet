@@ -13,6 +13,7 @@ import dev.nercone.typefacedroplet.DropletApplication
 import dev.nercone.typefacedroplet.R
 import dev.nercone.typefacedroplet.engine.ReloadOutcome
 import dev.nercone.typefacedroplet.ui.MainActivity
+import kotlinx.coroutines.CancellationException
 
 /**
  * Applies the configuration after a boot when the boot hook did not (no root manager runs boot
@@ -33,6 +34,10 @@ class ApplyWorker(context: Context, parameters: WorkerParameters) : CoroutineWor
             val applied = droplet.applyAfterBoot()
             if (applied?.report?.reload == ReloadOutcome.IGNORED) notify(applicationContext.getString(R.string.boot_not_reloaded))
             Result.success()
+        } catch (error: CancellationException) {
+            // The work was stopped (replaced by the work of a later boot, or by the system): that
+            // is no failure to report.
+            throw error
         } catch (error: Exception) {
             notify(applicationContext.getString(R.string.boot_failed, error.message ?: error.toString()))
             Result.failure()
