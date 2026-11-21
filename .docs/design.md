@@ -166,6 +166,23 @@ sibling application built the same way, so that both behave alike.
   timeout of a command; an application that took the lock in between still saw the guard
   watching, stopped it and applied the configuration that had just failed again.
 
+- **The engine leaves the cgroup of the application** (`ControlGroup` of `crates/android`). Android
+  keeps a group for every application process (`/apps/uid_<uid>/pid_<pid>` of the unified
+  hierarchy on Android 17), freezes it while the application is cached (seen on the emulator:
+  `cgroup.events` reads `frozen 1` some seconds after the application went to the background)
+  and ends every process in it with the application (`killProcessGroup` of libprocessgroup). The
+  `su` of KernelSU and APatch raises the calling process itself (KernelSU's `execve` hook calls
+  `ksu_escape_to_root` on it), so the engine, and every process it started, stayed in that group;
+  Magisk's `su` has its daemon start the root process, outside it. An engine run as root now
+  moves itself into the root groups first, when it finds itself in the group of an application
+  process, and the processes it starts are outside the group too. The guard and the cleanup daemon
+  inherit it: a guard frozen or ended with the application cannot undo a configuration that
+  breaks the system, which is when the application is ended too.
+  Moving every engine run was preferred to moving only the long-lived processes: a command that
+  holds the lock of the store must not be frozen with the application either. Running the
+  operations of the screens as expedited work or in a foreground service was set aside: it keeps
+  the application running, but neither stops the system from ending it.
+
 ### Known and not changed
 
 These were found in a review and are plausible, but need a device with root to reproduce and a
@@ -254,3 +271,17 @@ writes the scripts that name the new copy first, and only then removes the earli
 
 The Gradle property that limits the ABIs of a local build is `engine.abis` in both applications,
 so that the build files differ only in the names of the application.
+
+## Dependencies
+
+Every dependency is verified (`gradle/verification-metadata.xml`, SHA-256). The file is generated
+by Gradle (`--write-verification-metadata sha256` with the tasks of the CI and of a local build:
+`:app:testDebugUnitTest :app:assembleRelease :app:assembleDebug :app:lintDebug`), after its
+components were emptied, so that versions no longer used leave it. Gradle records the artifacts of
+the machine it runs on only: `aapt2` comes in one jar per system, and the jar for Linux, where the
+CI builds, is added by hand from Google's Maven repository. Both applications share the file.
+
+Material 3 is 1.5.0, its first stable release with the Expressive components, which needs Compose
+1.12 and so stays with the Compose BOM 2026.09.00. The next BOM (2026.11.01, Compose 1.13)
+requires `compileSdk` 37.1, a platform the build machines do not have yet; it was left for a
+change of its own.
