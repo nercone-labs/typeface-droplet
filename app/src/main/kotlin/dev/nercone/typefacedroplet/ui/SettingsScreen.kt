@@ -2,35 +2,46 @@ package dev.nercone.typefacedroplet.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import dev.nercone.typefacedroplet.R
 import dev.nercone.typefacedroplet.config.Settings
+import dev.nercone.typefacedroplet.engine.BootHook
 import dev.nercone.typefacedroplet.engine.Config
 import dev.nercone.typefacedroplet.engine.Engine
+import dev.nercone.typefacedroplet.privilege.Privilege
 import dev.nercone.typefacedroplet.privilege.PrivilegeChoice
+import dev.nercone.typefacedroplet.ui.Notices.notices
 
-/** Settings of the application and of the parts of the configuration that are not fonts. */
+/**
+ * The settings of the application and of the parts of the configuration that are not fonts: a
+ * list of pages, each of one concern, so that no page is a wall of choices. The frame shows a
+ * page in place of the list, with a way back (`DropletApp`).
+ */
 object SettingsScreen {
-    const val GUARD_MAXIMUM = 300
-    const val GUARD_STEP = 10
+    /** A page of the settings. */
+    enum class Page(val title: Int) {
+        PRIVILEGE(R.string.settings_privilege),
+        BOOT(R.string.settings_boot),
+        APPLYING(R.string.settings_applying),
+        COMPONENTS(R.string.settings_components),
+        ADVANCED(R.string.settings_advanced),
+        ABOUT(R.string.settings_about),
+    }
 
     /** The restart targets with a switch of their own. */
     val TARGETS = listOf("com.android.systemui" to R.string.restart_systemui, Config.HOME to R.string.restart_home, Config.BACKGROUND to R.string.restart_background)
@@ -38,144 +49,205 @@ object SettingsScreen {
     /** The components of the downloadable font provider of Google Play services. */
     val PROVIDER = listOf("com.google.android.gms/.fonts.provider.FontsProvider", "com.google.android.gms/.fonts.update.UpdateSchedulerService")
 
-    @OptIn(ExperimentalMaterial3Api::class)
+    /** The guard durations offered, in seconds; a value set otherwise (by an earlier version) is offered too. */
+    val GUARD_SECONDS = listOf(0, 30, 60, 120, 300)
+
     @Composable
-    fun Content(state: UiState, config: Config?, settings: Settings.Values, model: AppViewModel) {
-        val privileged = state.privilege?.privilege != null && state.operation == null
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(Widgets.SCREEN_PADDING),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Widgets.Header(stringResource(R.string.settings_privilege))
-            Widgets.Group {
-                PrivilegeChoice.entries.forEachIndexed { index, choice ->
-                    Widgets.RadioItem(
-                        index, PrivilegeChoice.entries.size,
-                        headline = stringResource(
-                            when (choice) {
-                                PrivilegeChoice.AUTOMATIC -> R.string.settings_privilege_automatic
-                                PrivilegeChoice.SHIZUKU -> R.string.settings_privilege_shizuku
-                                PrivilegeChoice.ROOT -> R.string.settings_privilege_root
-                            },
-                        ),
-                        supporting = state.privilege?.statuses?.let { statuses ->
-                            when (choice) {
-                                PrivilegeChoice.AUTOMATIC -> state.privilege.privilege?.let { stringResource(R.string.privilege_runs_as_root, Privileges.name(it.kind)) }
-                                else -> statuses.firstOrNull { (kind, _) -> (kind == dev.nercone.typefacedroplet.privilege.Privilege.Kind.ROOT) == (choice == PrivilegeChoice.ROOT) }
-                                    ?.let { (_, status) -> Privileges.describe(status) }
-                            }
-                        },
-                        selected = settings.privilege == choice,
-                    ) { model.setPrivilegeChoice(choice) }
-                }
+    fun Content(data: ScreenData, model: AppViewModel, page: Page?, onOpen: (Page) -> Unit) {
+        Widgets.Screen {
+            notices(data, model)
+            when (page) {
+                null -> item(key = "pages") { Pages(data, onOpen) }
+                Page.PRIVILEGE -> item(key = "privilege") { Privilege(data, model) }
+                Page.BOOT -> item(key = "boot") { Boot(data, model) }
+                Page.APPLYING -> item(key = "applying") { Configured(data) { config -> Applying(config, model) } }
+                Page.COMPONENTS -> item(key = "components") { Configured(data) { config -> Components(config, model) } }
+                Page.ADVANCED -> item(key = "advanced") { Configured(data) { config -> Advanced(config, data.settings, model) } }
+                Page.ABOUT -> item(key = "about") { About() }
             }
-            Text(stringResource(R.string.settings_privilege_help), style = MaterialTheme.typography.bodySmall, color = Widgets.secondary, modifier = Modifier.padding(horizontal = 16.dp))
+        }
+    }
 
-            Widgets.Header(stringResource(R.string.settings_boot))
-            val hook = state.status?.hook
-            Widgets.Group {
-                Widgets.SwitchItem(
-                    0, 2,
-                    headline = stringResource(R.string.settings_boot_hook),
-                    supporting = when {
-                        hook == null -> stringResource(R.string.settings_boot_hook_help)
-                        hook.managers.isEmpty() -> stringResource(R.string.settings_boot_hook_unsupported)
-                        hook.installed -> stringResource(R.string.boot_hook_installed, HomeScreen.managerNames(hook.managers))
-                        else -> stringResource(R.string.settings_boot_hook_pending, HomeScreen.managerNames(hook.managers))
+    /** Shows `content` with the configuration, or that it is not loaded (yet, or because loading failed). */
+    @Composable
+    fun Configured(data: ScreenData, content: @Composable (Config) -> Unit) {
+        val config = data.config
+        if (config == null) Widgets.Help(stringResource(if (data.state.ready) R.string.config_unavailable else R.string.loading)) else content(config)
+    }
+
+    /** The list of pages, each with a summary of what it is set to. */
+    @Composable
+    fun Pages(data: ScreenData, onOpen: (Page) -> Unit) {
+        val settings = data.settings
+        val config = data.config
+        val pages = listOf(
+            Triple(Page.PRIVILEGE, Icons.Default.Security, Labels.privilegeChoice(settings.privilege) + (data.state.privilege?.privilege?.let { " · " + Labels.privilege(it.kind) } ?: "")),
+            Triple(Page.BOOT, Icons.Default.PowerSettingsNew, bootSummary(data.state.status?.hook, settings)),
+            Triple(Page.APPLYING, Icons.Default.RestartAlt, config?.let { applyingSummary(it) } ?: stringResource(R.string.loading)),
+            Triple(Page.COMPONENTS, Icons.Default.Block, config?.let { pluralStringResource(R.plurals.components_count, it.components.size, it.components.size) } ?: stringResource(R.string.loading)),
+            Triple(Page.ADVANCED, Icons.Default.Tune, stringResource(if (settings.customized) R.string.customized_short else R.string.recommended_short)),
+            Triple(Page.ABOUT, Icons.Default.Info, stringResource(R.string.settings_version, version())),
+        )
+        Widgets.Group {
+            pages.forEachIndexed { index, (page, icon, summary) ->
+                Widgets.Item(index, pages.size, stringResource(page.title), summary, icon, onClick = { onOpen(page) })
+            }
+        }
+    }
+
+    /** What happens at boot, in a line: by the root manager, by this application, or nothing. */
+    @Composable
+    fun bootSummary(hook: BootHook?, settings: Settings.Values): String = when {
+        settings.bootHook && hook?.installed == true -> stringResource(R.string.boot_hook_installed, Labels.rootManagers(hook.managers))
+        settings.bootHook && hook != null && hook.managers.isEmpty() && settings.applyAfterBoot -> stringResource(R.string.boot_no_manager_application)
+        settings.applyAfterBoot -> stringResource(R.string.boot_application)
+        settings.bootHook && hook == null -> stringResource(R.string.unknown)
+        else -> stringResource(R.string.boot_off)
+    }
+
+    @Composable
+    fun applyingSummary(config: Config): String {
+        val restarts = config.restart.size
+        return pluralStringResource(R.plurals.restart_count, restarts, restarts) + " · " + stringResource(R.string.settings_guard) + " " + Labels.guard(config.guardSeconds)
+    }
+
+    @Composable
+    fun version(): String {
+        val context = LocalContext.current
+        return remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty() }
+    }
+
+    @Composable
+    fun Privilege(data: ScreenData, model: AppViewModel) {
+        val state = data.state
+        Widgets.Section(null, stringResource(R.string.settings_privilege_help)) {
+            PrivilegeChoice.entries.forEachIndexed { index, choice ->
+                Widgets.RadioItem(
+                    index, PrivilegeChoice.entries.size,
+                    headline = Labels.privilegeChoice(choice),
+                    supporting = state.privilege?.statuses?.let { statuses ->
+                        when (choice) {
+                            PrivilegeChoice.AUTOMATIC -> state.privilege.privilege?.let { stringResource(R.string.privilege_runs_as_root, Labels.privilege(it.kind)) }
+                            else -> statuses.firstOrNull { (kind, _) -> (kind == Privilege.Kind.ROOT) == (choice == PrivilegeChoice.ROOT) }
+                                ?.let { (_, status) -> Labels.describe(status) }
+                        }
                     },
-                    checked = settings.bootHook,
-                    enabled = privileged,
-                    onChange = model::setBootHook,
-                )
-                Widgets.SwitchItem(
-                    1, 2,
-                    headline = stringResource(R.string.settings_apply_after_boot),
-                    supporting = stringResource(R.string.settings_apply_after_boot_help),
-                    checked = settings.applyAfterBoot,
-                    onChange = model::setApplyAfterBoot,
-                )
+                    selected = data.settings.privilege == choice,
+                    enabled = state.operation == null,
+                ) { model.setPrivilegeChoice(choice) }
             }
-            if (config == null) return@Column
+        }
+    }
 
-            Widgets.Header(stringResource(R.string.settings_restart))
-            Widgets.Group {
+    @Composable
+    fun Boot(data: ScreenData, model: AppViewModel) {
+        val hook = data.state.status?.hook
+        val settings = data.settings
+        Widgets.Section(null, stringResource(R.string.settings_boot_help)) {
+            Widgets.SwitchItem(
+                0, 2,
+                headline = stringResource(R.string.settings_boot_hook),
+                supporting = when {
+                    hook == null -> stringResource(R.string.settings_boot_hook_help)
+                    hook.managers.isEmpty() -> stringResource(R.string.settings_boot_hook_unsupported)
+                    hook.installed -> stringResource(R.string.boot_hook_installed, Labels.rootManagers(hook.managers))
+                    else -> stringResource(R.string.settings_boot_hook_pending, Labels.rootManagers(hook.managers))
+                },
+                checked = settings.bootHook,
+                // Installing or removing the scripts needs root.
+                enabled = data.state.idle,
+                onChange = model::setBootHook,
+            )
+            Widgets.SwitchItem(
+                1, 2,
+                headline = stringResource(R.string.settings_apply_after_boot),
+                supporting = stringResource(R.string.settings_apply_after_boot_help),
+                checked = settings.applyAfterBoot,
+                onChange = model::setApplyAfterBoot,
+            )
+        }
+    }
+
+    @Composable
+    fun Applying(config: Config, model: AppViewModel) {
+        Column(verticalArrangement = Arrangement.spacedBy(Widgets.SPACING)) {
+            Widgets.Section(stringResource(R.string.settings_restart), stringResource(R.string.settings_restart_help)) {
+                val count = TARGETS.size + 1
                 TARGETS.forEachIndexed { index, (target, title) ->
-                    Widgets.SwitchItem(index, TARGETS.size + 1, stringResource(title), null, target in config.restart) { enabled ->
-                        model.configure { it.copy(restart = if (enabled) it.restart + target else it.restart - target) }
+                    Widgets.SwitchItem(index, count, stringResource(title), null, target in config.restart) { enabled ->
+                        model.configure { it.copy(restart = if (enabled) (it.restart + target).distinct() else it.restart - target) }
                     }
                 }
-                Surface(shape = MaterialTheme.shapes.extraSmall, color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.restart_other), style = MaterialTheme.typography.bodyLarge)
-                        Widgets.StringList(
-                            items = config.restart.filter { target -> TARGETS.none { it.first == target } },
-                            label = stringResource(R.string.settings_package),
-                            validate = { Config.PACKAGE.matches(it) && it !in config.restart },
-                            onChange = { list -> model.configure { current -> current.copy(restart = current.restart.filter { target -> TARGETS.any { it.first == target } } + list) } },
-                        )
-                    }
-                }
+                Widgets.StringListItem(
+                    TARGETS.size, count,
+                    headline = stringResource(R.string.restart_other),
+                    items = config.restart.filter { target -> TARGETS.none { it.first == target } },
+                    label = stringResource(R.string.settings_package),
+                    help = stringResource(R.string.restart_other_help),
+                    validate = { Config.PACKAGE.matches(it) && it !in config.restart },
+                    onAdd = { target -> model.configure { it.copy(restart = (it.restart + target).distinct()) } },
+                    onRemove = { target -> model.configure { it.copy(restart = it.restart - target) } },
+                )
             }
-            Text(stringResource(R.string.settings_restart_help), style = MaterialTheme.typography.bodySmall, color = Widgets.secondary, modifier = Modifier.padding(horizontal = 16.dp))
-
-            Widgets.Header(stringResource(R.string.settings_components))
-            Widgets.Group {
-                Widgets.SwitchItem(0, 2, stringResource(R.string.components_provider), stringResource(R.string.components_provider_help), PROVIDER.all { it in config.components }) { enabled ->
-                    model.configure { it.copy(components = if (enabled) (it.components + PROVIDER).distinct() else it.components - PROVIDER.toSet()) }
-                }
-                Surface(shape = MaterialTheme.shapes.extraSmall, color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.components_other), style = MaterialTheme.typography.bodyLarge)
-                        Widgets.StringList(
-                            items = config.components - PROVIDER.toSet(),
-                            label = stringResource(R.string.settings_component),
-                            validate = { Config.isComponent(it) && it !in config.components },
-                            onChange = { list -> model.configure { current -> current.copy(components = current.components.filter { it in PROVIDER } + list) } },
-                        )
-                    }
-                }
+            Widgets.Section(stringResource(R.string.settings_guard), null) {
+                val options = (GUARD_SECONDS + config.guardSeconds).distinct().sorted()
+                Widgets.ChoiceItem(
+                    0, 1,
+                    headline = stringResource(R.string.settings_guard_duration),
+                    options = options,
+                    selected = config.guardSeconds,
+                    describe = { Labels.guard(it) },
+                    onSelect = { seconds -> model.configure { it.copy(guardSeconds = seconds) } },
+                    description = stringResource(R.string.settings_guard_help),
+                    help = { seconds -> if (seconds == 0) stringResource(R.string.settings_guard_off_help) else null },
+                )
             }
-            Text(stringResource(R.string.settings_components_help), style = MaterialTheme.typography.bodySmall, color = Widgets.secondary, modifier = Modifier.padding(horizontal = 16.dp))
+        }
+    }
 
-            Widgets.Header(stringResource(R.string.settings_guard))
-            Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    val slider = remember(config.guardSeconds) {
-                        SliderState(config.guardSeconds.coerceAtMost(GUARD_MAXIMUM).toFloat(), GUARD_MAXIMUM / GUARD_STEP - 1, 0f..GUARD_MAXIMUM.toFloat())
-                    }
-                    val seconds = slider.value.toInt()
-                    Text(
-                        if (seconds == 0) stringResource(R.string.settings_guard_off) else stringResource(R.string.settings_guard_seconds, seconds),
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Slider(
-                        state = slider,
-                        onValueChange = { slider.value = it },
-                        onValueChangeFinished = { model.configure { it.copy(guardSeconds = slider.value.toInt()) } },
-                    )
-                    Text(stringResource(R.string.settings_guard_help), style = MaterialTheme.typography.bodySmall, color = Widgets.secondary)
-                }
+    @Composable
+    fun Components(config: Config, model: AppViewModel) {
+        Widgets.Section(null, stringResource(R.string.settings_components_help)) {
+            Widgets.SwitchItem(0, 2, stringResource(R.string.components_provider), stringResource(R.string.components_provider_help), PROVIDER.all { it in config.components }) { enabled ->
+                model.configure { it.copy(components = if (enabled) (it.components + PROVIDER).distinct() else it.components - PROVIDER.toSet()) }
             }
+            Widgets.StringListItem(
+                1, 2,
+                headline = stringResource(R.string.components_other),
+                items = config.components - PROVIDER.toSet(),
+                label = stringResource(R.string.settings_component),
+                help = stringResource(R.string.components_other_help),
+                validate = { Config.isComponent(it) && it !in config.components },
+                onAdd = { component -> model.configure { it.copy(components = (it.components + component).distinct()) } },
+                onRemove = { component -> model.configure { it.copy(components = it.components - component) } },
+            )
+        }
+    }
 
-            Widgets.Header(stringResource(R.string.settings_advanced))
-            var confirm by remember { mutableStateOf(false) }
-            Widgets.Group {
-                Widgets.SwitchItem(0, 2, stringResource(R.string.settings_unknown_versions), stringResource(R.string.settings_unknown_versions_help), config.allowUnknownVersions) { enabled ->
+    @Composable
+    fun Advanced(config: Config, settings: Settings.Values, model: AppViewModel) {
+        var confirm by rememberSaveable { mutableStateOf(false) }
+        Column(verticalArrangement = Arrangement.spacedBy(Widgets.SPACING)) {
+            Widgets.Section(stringResource(R.string.settings_rules), stringResource(if (settings.customized) R.string.customized_text else R.string.recommended_text)) {
+                Widgets.Item(0, 1, stringResource(R.string.reset), stringResource(R.string.reset_text), Icons.Default.RestartAlt, onClick = { confirm = true })
+            }
+            Widgets.Section(stringResource(R.string.settings_documents), null) {
+                Widgets.SwitchItem(0, 1, stringResource(R.string.settings_unknown_versions), stringResource(R.string.settings_unknown_versions_help), config.allowUnknownVersions) { enabled ->
                     model.configure { it.copy(allowUnknownVersions = enabled) }
                 }
-                Widgets.Item(1, 2, stringResource(R.string.reset), stringResource(R.string.reset_text), onClick = { confirm = true })
             }
-            if (confirm) Widgets.Confirm(stringResource(R.string.reset_title), stringResource(R.string.reset_text), stringResource(R.string.reset), model::reset) { confirm = false }
+        }
+        if (confirm) Widgets.Confirm(stringResource(R.string.reset_title), stringResource(R.string.reset_text), stringResource(R.string.reset_confirm), model::reset) { confirm = false }
+    }
 
-            Widgets.Header(stringResource(R.string.settings_about))
-            val context = LocalContext.current
-            val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty() }
-            Widgets.Group {
-                Widgets.Item(0, 3, stringResource(R.string.app_name), stringResource(R.string.settings_version, version))
+    @Composable
+    fun About() {
+        Column(verticalArrangement = Arrangement.spacedBy(Widgets.SPACING)) {
+            Widgets.Section(null, stringResource(R.string.settings_uninstall)) {
+                Widgets.Item(0, 3, stringResource(R.string.app_name), stringResource(R.string.settings_version, version()))
                 Widgets.Item(1, 3, stringResource(R.string.settings_store_title), stringResource(R.string.settings_store, Engine.STORE))
                 Widgets.Item(2, 3, stringResource(R.string.settings_license_title), stringResource(R.string.settings_fonts_license))
             }
-            Text(stringResource(R.string.settings_uninstall), style = MaterialTheme.typography.bodySmall, color = Widgets.secondary, modifier = Modifier.padding(16.dp))
         }
     }
 }

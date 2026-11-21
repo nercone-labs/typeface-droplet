@@ -26,6 +26,7 @@ import dev.nercone.typefacedroplet.privilege.PrivilegeSelection
 import dev.nercone.typefacedroplet.privilege.PrivilegeSelector
 import dev.nercone.typefacedroplet.privilege.RootPrivilege
 import dev.nercone.typefacedroplet.privilege.ShizukuPrivilege
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -42,8 +43,8 @@ class Droplet(context: Context) {
     val shizuku = ShizukuPrivilege(context)
     val selector = PrivilegeSelector(shizuku, RootPrivilege())
     val operations = Mutex()
-    val initialization = Mutex()
-    var initialized = false
+    private val initialization = Mutex()
+    private var initialized = false
 
     init {
         // A configuration of an earlier version, which had no font selection, counts as edited
@@ -55,7 +56,11 @@ class Droplet(context: Context) {
     /** The outcome of an application: the engine report, and the boot hook if it was installed or failed. */
     data class Applied(val report: ApplyReport, val log: List<LogLine>, val hook: BootHook?, val hookFailure: String?)
 
-    /** Loads the library and the configuration, creating the recommended configuration on first use. */
+    /**
+     * Loads the library and the configuration, creating the recommended configuration on first
+     * use (or when the stored one cannot be read, see `ConfigRepository.load`). Once it has
+     * succeeded it does nothing; after a failure the next call tries again.
+     */
     suspend fun initialize() = initialization.withLock {
         if (initialized) return@withLock
         library.load()
@@ -147,30 +152,43 @@ class Droplet(context: Context) {
 
     suspend fun privilege(): Privilege = selectPrivilege().privilege ?: throw PrivilegeException("no privilege can run the engine as root")
 
-    suspend fun status(): EngineResult<StatusReport> = engine.status(privilege())
+    suspend fun status(): EngineResult<StatusReport> = status(privilege())
 
-    suspend fun families(): EngineResult<List<FamilyInfo>> = engine.families(privilege())
+    /** The state of the system, read with `privilege` that the caller already selected. */
+    suspend fun status(privilege: Privilege): EngineResult<StatusReport> = engine.status(privilege)
+
+    /** The font families of the system documents, read with `privilege` that the caller already selected. */
+    suspend fun families(privilege: Privilege): EngineResult<List<FamilyInfo>> = engine.families(privilege)
 
     /**
      * Applies the current configuration. With `boot`, the engine refuses if its guard tripped.
      * Then the boot hook is installed (with a fresh copy of the engine) or removed, as the
-     * settings say; a failure of that does not undo the application.
+     * settings say; a failure of that does not undo the application, and is reported with it.
      */
     suspend fun apply(boot: Boolean): Applied = operations.withLock {
         initialize()
         val config = configs.config.value ?: throw EngineException("config", "there is no configuration", emptyList())
+        val applied = ConfigRepository.synchronize(config, library.fonts.value)
         val privilege = privilege()
-        val result = engine.apply(privilege, ConfigRepository.synchronize(config, library.fonts.value), boot)
-        settings.update { it.copy(applied = true) }
-        val hook = runCatching { synchronizeHook(privilege) }
-        Applied(result.value, result.log, hook.getOrNull(), hook.exceptionOrNull()?.let { it.message ?: it.toString() })
+        val result = engine.apply(privilege, applied, boot)
+        // The digest of the configuration as stored, which the screens compare with: the one
+        // applied differs only in the sources of the fonts and in fonts the library lost.
+        settings.update { it.copy(applied = true, appliedDigest = config.digest()) }
+        val hook = try {
+            synchronizeHook(privilege)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            return@withLock Applied(result.value, result.log, null, error.message ?: error.toString())
+        }
+        Applied(result.value, result.log + hook.log, hook.value, null)
     }
 
     /** Installs or removes the boot hook as the settings say. */
-    suspend fun synchronizeHook(privilege: Privilege): BootHook =
-        if (settings.values.value.bootHook) engine.installHook(privilege).value else engine.removeHook(privilege).value
+    suspend fun synchronizeHook(privilege: Privilege): EngineResult<BootHook> =
+        if (settings.values.value.bootHook) engine.installHook(privilege) else engine.removeHook(privilege)
 
-    suspend fun setBootHook(enabled: Boolean): BootHook = operations.withLock {
+    suspend fun setBootHook(enabled: Boolean): EngineResult<BootHook> = operations.withLock {
         settings.update { it.copy(bootHook = enabled) }
         synchronizeHook(privilege())
     }
@@ -194,7 +212,7 @@ class Droplet(context: Context) {
         try {
             engine.revert(privilege)
         } finally {
-            settings.update { it.copy(applied = false) }
+            settings.update { it.copy(applied = false, appliedDigest = null) }
         }
     }
 
@@ -202,10 +220,14 @@ class Droplet(context: Context) {
         engine.softRestart(privilege(), configs.config.value?.guardSeconds ?: Config().guardSeconds)
     }
 
-    suspend fun importFont(uri: Uri, name: String): LibraryFont {
+    /** Imports a font into the library; `known` tells that the library had it already. */
+    data class Imported(val font: LibraryFont, val known: Boolean)
+
+    suspend fun importFont(uri: Uri, name: String): Imported {
+        val before = library.fonts.value.map { it.id }.toSet()
         val font = library.import(uri, name)
         configs.update { ConfigRepository.synchronize(it, library.fonts.value) }
-        return font
+        return Imported(font, font.id in before)
     }
 
     /** Removes an imported font that no role uses. */

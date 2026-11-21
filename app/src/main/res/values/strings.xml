@@ -33,7 +33,6 @@
     <string name="operation_reverting">Restoring the original fonts…</string>
     <string name="operation_restarting">Restarting the system…</string>
     <string name="operation_importing">Importing the font…</string>
-    <string name="operation_loading_families">Reading the system font families…</string>
     <string name="operation_configuring_boot">Configuring the boot…</string>
 
     <string name="hero_preparing">Getting ready</string>
@@ -65,8 +64,6 @@
     <string name="show_log">Show log</string>
 
     <string name="outcome_applied">Applied</string>
-    <string name="outcome_applied_text">%1$d font families were replaced. Applications started from now on use the new fonts.</string>
-    <string name="outcome_applied_text_restarted">%1$d font families were replaced. The system interface, the home screen and the applications in the background were restarted, so that they use the new fonts too.</string>
     <string name="outcome_ignored">A soft restart is needed</string>
     <string name="outcome_ignored_text">The fonts are in place, but the font service of this system cannot reload them by itself (it can only with fs-verity). A soft restart restarts the system services and every application, without rebooting the device.</string>
     <string name="outcome_unchanged">Nothing changed</string>
@@ -76,6 +73,8 @@
     <string name="outcome_reverted_text">They also stay after a restart of the device. Applications that are running keep the replacement fonts until they restart.</string>
     <string name="outcome_restarting">Restarting softly</string>
     <string name="outcome_restarting_text">The system services restart now; the screen goes dark for a moment.</string>
+    <string name="outcome_config_set_aside">Your configuration could not be read</string>
+    <string name="outcome_config_set_aside_text">It was kept as %1$s in the files of this application, and the recommended configuration is in use now.</string>
     <string name="outcome_failed">Failed</string>
 
     <string name="restricted_title">Root is restricted</string>
@@ -99,9 +98,7 @@
     <string name="boot_off">Not applied at boot</string>
     <string name="guard_watching">Watching the system after the change; it restores the original fonts if the system crashes.</string>
     <string name="guard_tripped">Tripped: %1$s</string>
-    <string name="components_disabled">%1$d disabled while the fonts are applied</string>
     <string name="log">Engine log</string>
-    <string name="log_lines">%1$d lines of the last operation</string>
     <string name="log_empty">No operation has run yet.</string>
 
     <string name="privilege_root">su</string>
@@ -163,7 +160,6 @@
     <string name="reset_text">Fonts, roles, rules, components and restart targets return to the recommended configuration with the bundled fonts. Imported fonts stay in the library.</string>
 
     <string name="roles_empty">No roles. A role is a set of fonts that replaces system font families.</string>
-    <string name="role_used_by">Used by %1$d rules</string>
     <string name="role_new">New role</string>
     <string name="role_edit">Edit role</string>
     <string name="role_name">Name</string>
@@ -240,7 +236,6 @@
     <string name="settings_components_help">Components are disabled for every user while the fonts are applied, and restored when the original fonts are restored.</string>
     <string name="settings_guard">Guard</string>
     <string name="settings_guard_off">Off</string>
-    <string name="settings_guard_seconds">%1$d seconds</string>
     <string name="settings_guard_help">After a change, the guard watches the system for this long. If the system crashes, it restores the original fonts at once, and the fonts are not applied at boot until you apply them by hand. At boot it always watches until the system has started, and then at least 30 seconds.</string>
     <string name="settings_advanced">Advanced</string>
     <string name="settings_unknown_versions">Accept unknown document versions</string>
@@ -252,4 +247,67 @@
     <string name="settings_license_title">Bundled fonts</string>
     <string name="settings_fonts_license">Nercone Sans, Serif and Mono CJK NF, licensed under the SIL Open Font License 1.1.</string>
     <string name="settings_uninstall">When TypeFace Droplet is uninstalled while it applies fonts at boot through a root manager, the next boot uses the original fonts, and once the system has started, the engine re-enables the components it disabled and removes its files. Otherwise, restore the original fonts before uninstalling, so that the components are enabled again.</string>
+
+    <string name="back">Back</string>
+    <string name="none">None</string>
+    <string name="done">Done</string>
+    <string name="try_again">Try again</string>
+    <string name="apply_now">Apply now</string>
+    <string name="pending_title">Changes not applied yet</string>
+    <string name="pending_text">The fonts, the rules or the options changed since the fonts were applied. Apply them to use the changes.</string>
+    <string name="details_title">Details</string>
+    <string name="no_file_picker">This system has no application to choose files with.</string>
+    <string name="config_unavailable">The configuration could not be loaded. Check again from the home screen.</string>
+    <string name="hero_restricted">Root is restricted</string>
+    <string name="hero_restricted_text">The root manager runs this application as root but takes the capabilities of root away. Grant full root access to TypeFace Droplet in the root manager.</string>
+    <string name="hero_unreadable">Cannot read the system</string>
+    <string name="hero_unreadable_text">Root is available, but the engine could not read which fonts the system uses. The log tells why.</string>
+    <string name="outcome_imported">Font imported</string>
+    <string name="outcome_import_known">This font is in the library already</string>
+    <string name="families_failed">The families of the system could not be read</string>
+    <string name="rules_empty">No rules. Without rules, no family of the system is replaced.</string>
+    <string name="settings_applying">Applying</string>
+    <string name="settings_boot_help">Mounts do not survive a restart of the device, so the fonts are applied again at every boot.</string>
+    <string name="restart_other_help">Package names of applications that are restarted after applying and restoring, such as com.android.chrome.</string>
+    <string name="components_other_help">Components, as package/class, that are disabled for every user while the fonts are applied.</string>
+    <string name="settings_guard_duration">Watch after a change</string>
+    <string name="settings_guard_off_help">A crash of the system after a change keeps the replacement fonts.</string>
+    <string name="settings_rules">Roles and rules</string>
+    <string name="settings_documents">Font configurations</string>
+    <string name="customized_short">Rules edited by hand</string>
+    <string name="recommended_short">Recommended rules</string>
+    <string name="reset_confirm">Reset</string>
+
+    <plurals name="seconds">
+        <item quantity="one">%1$d second</item>
+        <item quantity="other">%1$d seconds</item>
+    </plurals>
+    <plurals name="outcome_applied_text">
+        <item quantity="one">%1$d font family was replaced. Applications started from now on use the new fonts.</item>
+        <item quantity="other">%1$d font families were replaced. Applications started from now on use the new fonts.</item>
+    </plurals>
+    <plurals name="outcome_applied_text_restarted">
+        <item quantity="one">%1$d font family was replaced. The system interface, the home screen and the applications in the background were restarted, so that they use the new fonts too.</item>
+        <item quantity="other">%1$d font families were replaced. The system interface, the home screen and the applications in the background were restarted, so that they use the new fonts too.</item>
+    </plurals>
+    <plurals name="components_disabled">
+        <item quantity="one">%1$d disabled while the fonts are applied</item>
+        <item quantity="other">%1$d disabled while the fonts are applied</item>
+    </plurals>
+    <plurals name="log_lines">
+        <item quantity="one">%1$d line of the last operation</item>
+        <item quantity="other">%1$d lines of the last operation</item>
+    </plurals>
+    <plurals name="role_used_by">
+        <item quantity="one">Used by %1$d rule</item>
+        <item quantity="other">Used by %1$d rules</item>
+    </plurals>
+    <plurals name="components_count">
+        <item quantity="one">%1$d component disabled while applied</item>
+        <item quantity="other">%1$d components disabled while applied</item>
+    </plurals>
+    <plurals name="restart_count">
+        <item quantity="one">%1$d restart target</item>
+        <item quantity="other">%1$d restart targets</item>
+    </plurals>
 </resources>

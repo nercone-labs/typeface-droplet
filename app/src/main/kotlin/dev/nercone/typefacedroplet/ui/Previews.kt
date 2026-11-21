@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.text.font.FontFamily
+import dev.nercone.typefacedroplet.config.Category
 import dev.nercone.typefacedroplet.library.FontLibrary
 import dev.nercone.typefacedroplet.library.LibraryFont
 import kotlinx.coroutines.Dispatchers
@@ -18,5 +19,12 @@ object Previews {
             value = font?.let { withContext(Dispatchers.IO) { library.typeface(it, italic = italic)?.let { typeface -> FontFamily(typeface) } } }
         }
         return family
+    }
+
+    /** The generic family of the system for a category, shown when no font is chosen. */
+    fun systemFamily(category: Category): FontFamily = when (category) {
+        Category.SANS -> FontFamily.SansSerif
+        Category.SERIF -> FontFamily.Serif
+        Category.MONO -> FontFamily.Monospace
     }
 }

@@ -32,7 +32,6 @@
     <string name="operation_reverting">元のフォントに戻しています…</string>
     <string name="operation_restarting">システムを再起動しています…</string>
     <string name="operation_importing">フォントを読み込んでいます…</string>
-    <string name="operation_loading_families">システムのフォントファミリーを読み込んでいます…</string>
     <string name="operation_configuring_boot">起動時の設定を変更しています…</string>
 
     <string name="hero_preparing">準備しています</string>
@@ -64,8 +63,6 @@
     <string name="show_log">ログを見る</string>
 
     <string name="outcome_applied">適用しました</string>
-    <string name="outcome_applied_text">%1$d 個のフォントファミリーを置き換えました。これから起動するアプリは新しいフォントを使います。</string>
-    <string name="outcome_applied_text_restarted">%1$d 個のフォントファミリーを置き換えました。システム UI・ホーム画面・バックグラウンドのアプリも再起動したので、これらも新しいフォントを使います。</string>
     <string name="outcome_ignored">ソフトリスタートが必要です</string>
     <string name="outcome_ignored_text">フォントは配置しましたが、このシステムのフォントサービスは自力で再読み込みできません(fs-verity 対応のシステムでのみ可能です)。ソフトリスタートは端末を再起動せずに、システムサービスとすべてのアプリを再起動します。</string>
     <string name="outcome_unchanged">変更はありません</string>
@@ -75,6 +72,8 @@
     <string name="outcome_reverted_text">端末を再起動しても元のフォントのままです。起動中のアプリは、再起動するまで置換フォントを使い続けます。</string>
     <string name="outcome_restarting">ソフトリスタートしています</string>
     <string name="outcome_restarting_text">システムサービスを再起動します。画面が一瞬暗くなります。</string>
+    <string name="outcome_config_set_aside">構成を読み込めませんでした</string>
+    <string name="outcome_config_set_aside_text">このアプリのファイルに %1$s として残し、推奨構成を使っています。</string>
     <string name="outcome_failed">失敗しました</string>
 
     <string name="restricted_title">root が制限されています</string>
@@ -98,9 +97,7 @@
     <string name="boot_off">起動時には適用しない</string>
     <string name="guard_watching">変更後のシステムを監視中です。システムが異常終了したら元のフォントに戻します。</string>
     <string name="guard_tripped">作動: %1$s</string>
-    <string name="components_disabled">フォントの適用中、%1$d 個を無効化</string>
     <string name="log">エンジンのログ</string>
-    <string name="log_lines">直前の操作のログ %1$d 行</string>
     <string name="log_empty">まだ操作を実行していません。</string>
 
     <string name="privilege_root">su</string>
@@ -162,7 +159,6 @@
     <string name="reset_text">フォント・ロール・ルール・コンポーネント・再起動の対象を、同梱フォントを使った推奨構成に戻します。読み込んだフォントはライブラリに残ります。</string>
 
     <string name="roles_empty">ロールがありません。ロールは、システムのフォントファミリーを置き換えるフォントのセットです。</string>
-    <string name="role_used_by">%1$d 個のルールで使用</string>
     <string name="role_new">新しいロール</string>
     <string name="role_edit">ロールを編集</string>
     <string name="role_name">名前</string>
@@ -239,7 +235,6 @@
     <string name="settings_components_help">コンポーネントはフォントの適用中、すべてのユーザーで無効になり、元のフォントに戻すと元の状態に戻ります。</string>
     <string name="settings_guard">安全装置</string>
     <string name="settings_guard_off">オフ</string>
-    <string name="settings_guard_seconds">%1$d 秒</string>
     <string name="settings_guard_help">変更後、この時間だけシステムを監視します。システムが異常終了したらすぐに元のフォントに戻し、手動で適用し直すまで起動時には適用しません。起動時は設定にかかわらず、システムの起動完了までと、その後少なくとも 30 秒間監視します。</string>
     <string name="settings_advanced">詳細</string>
     <string name="settings_unknown_versions">未知の文書バージョンを受け入れる</string>
@@ -251,4 +246,59 @@
     <string name="settings_license_title">同梱フォント</string>
     <string name="settings_fonts_license">Nercone Sans・Serif・Mono CJK NF(SIL Open Font License 1.1)</string>
     <string name="settings_uninstall">root マネージャによる起動時の適用を使っている状態で TypeFace Droplet をアンインストールすると、次回の起動では元のフォントが使われ、起動完了後にエンジンが無効化したコンポーネントを元に戻し、自身のファイルを削除します。それ以外の場合は、コンポーネントを元に戻すため、アンインストールの前に元のフォントに戻してください。</string>
+
+    <string name="back">戻る</string>
+    <string name="none">なし</string>
+    <string name="done">完了</string>
+    <string name="try_again">再試行</string>
+    <string name="apply_now">今すぐ適用</string>
+    <string name="pending_title">未適用の変更があります</string>
+    <string name="pending_text">フォントを適用した後に、フォント・ルール・オプションが変更されました。変更を使うには適用してください。</string>
+    <string name="details_title">詳細</string>
+    <string name="no_file_picker">このシステムにはファイルを選ぶアプリがありません。</string>
+    <string name="config_unavailable">構成を読み込めませんでした。ホーム画面から再確認してください。</string>
+    <string name="hero_restricted">root が制限されています</string>
+    <string name="hero_restricted_text">root マネージャはこのアプリを root として実行していますが、root の権限を取り除いています。root マネージャで TypeFace Droplet に完全な root アクセスを許可してください。</string>
+    <string name="hero_unreadable">システムを読み取れません</string>
+    <string name="hero_unreadable_text">root は使えますが、システムが使っているフォントをエンジンが読み取れませんでした。理由はログを確認してください。</string>
+    <string name="outcome_imported">フォントを取り込みました</string>
+    <string name="outcome_import_known">このフォントはすでにライブラリにあります</string>
+    <string name="families_failed">システムのファミリーを読み込めませんでした</string>
+    <string name="rules_empty">ルールがありません。ルールがないと、システムのファミリーは置き換えられません。</string>
+    <string name="settings_applying">適用</string>
+    <string name="settings_boot_help">マウントはデバイスの再起動で消えるため、起動のたびにフォントを適用し直します。</string>
+    <string name="restart_other_help">適用と復元の後に再起動するアプリのパッケージ名(例: com.android.chrome)。</string>
+    <string name="components_other_help">フォントの適用中、すべてのユーザーで無効化するコンポーネント(package/class 形式)。</string>
+    <string name="settings_guard_duration">変更後の監視</string>
+    <string name="settings_guard_off_help">変更後にシステムが異常終了しても、置き換えたフォントのままになります。</string>
+    <string name="settings_rules">ロールとルール</string>
+    <string name="settings_documents">フォント構成ファイル</string>
+    <string name="customized_short">手動で編集したルール</string>
+    <string name="recommended_short">推奨ルール</string>
+    <string name="reset_confirm">リセット</string>
+
+    <plurals name="seconds">
+        <item quantity="other">%1$d 秒</item>
+    </plurals>
+    <plurals name="outcome_applied_text">
+        <item quantity="other">%1$d 個のフォントファミリーを置き換えました。これから起動するアプリは新しいフォントを使います。</item>
+    </plurals>
+    <plurals name="outcome_applied_text_restarted">
+        <item quantity="other">%1$d 個のフォントファミリーを置き換えました。システム UI・ホーム画面・バックグラウンドのアプリも再起動したので、これらも新しいフォントを使います。</item>
+    </plurals>
+    <plurals name="components_disabled">
+        <item quantity="other">フォントの適用中、%1$d 個を無効化</item>
+    </plurals>
+    <plurals name="log_lines">
+        <item quantity="other">直前の操作のログ %1$d 行</item>
+    </plurals>
+    <plurals name="role_used_by">
+        <item quantity="other">%1$d 個のルールで使用</item>
+    </plurals>
+    <plurals name="components_count">
+        <item quantity="other">適用中に %1$d 個のコンポーネントを無効化</item>
+    </plurals>
+    <plurals name="restart_count">
+        <item quantity="other">再起動の対象 %1$d 件</item>
+    </plurals>
 </resources>

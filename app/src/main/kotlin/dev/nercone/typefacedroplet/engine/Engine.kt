@@ -5,9 +5,11 @@ import dev.nercone.typefacedroplet.privilege.Privilege
 import dev.nercone.typefacedroplet.privilege.ProcessRunner
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.builtins.ListSerializer
 
 /** A failed engine command, with the engine log of the attempt. */
 class EngineException(val kind: String, message: String, val log: List<LogLine>) : Exception(message) {
@@ -29,12 +31,18 @@ class Engine(val context: Context) {
     val executable: String = File(context.applicationInfo.nativeLibraryDir, EXECUTABLE).absolutePath
     val json = EngineJson.json
 
-    fun decode(output: String): EngineResponse {
-        val line = output.lineSequence().lastOrNull { it.startsWith("{") }
-            ?: throw EngineException("output", "the engine printed no result: ${output.take(500)}", emptyList())
+    /**
+     * The response the engine printed last in `stdout`. `stderr` only explains a missing or
+     * invalid response, such as the refusal of `su`, which prints nothing on the output.
+     */
+    fun decode(stdout: String, stderr: String): EngineResponse {
+        val line = stdout.lineSequence().lastOrNull { it.startsWith("{") }
+            ?: throw EngineException("output", "the engine printed no result: ${(stdout + "\n" + stderr).trim().take(MESSAGE_LENGTH)}", emptyList())
         return try {
             json.decodeFromString(EngineResponse.serializer(), line)
         } catch (error: SerializationException) {
+            throw EngineException("output", "the engine printed an invalid result: ${error.message}", emptyList())
+        } catch (error: IllegalArgumentException) {
             throw EngineException("output", "the engine printed an invalid result: ${error.message}", emptyList())
         }
     }
@@ -45,37 +53,43 @@ class Engine(val context: Context) {
             throw EngineException(error?.kind ?: "unknown", error?.message ?: "the engine failed", response.log)
         }
         val value = response.result ?: throw EngineException("output", "the engine returned no result", response.log)
-        return EngineResult(json.decodeFromJsonElement(serializer, value), response.log)
+        val decoded = try {
+            json.decodeFromJsonElement(serializer, value)
+        } catch (error: SerializationException) {
+            throw EngineException("output", "the engine returned an unexpected result: ${error.message}", response.log)
+        } catch (error: IllegalArgumentException) {
+            throw EngineException("output", "the engine returned an unexpected result: ${error.message}", response.log)
+        }
+        return EngineResult(decoded, response.log)
     }
 
     /** Runs the engine as the application. */
     suspend fun <T> run(arguments: List<String>, serializer: KSerializer<T>, timeoutMillis: Long = TIMEOUT_MILLIS): EngineResult<T> =
         withContext(Dispatchers.IO) {
             val output = ProcessRunner.run(listOf(executable) + arguments, timeoutMillis)
-            result(decode(output.stdout + "\n" + output.stderr), serializer)
+            if (output.exitCode == ProcessRunner.TIMEOUT_EXIT_CODE && output.stdout.isBlank()) throw timeout(output.stderr)
+            result(decode(output.stdout, output.stderr), serializer)
         }
 
     /** Runs the engine through `privilege`. */
     suspend fun <T> run(privilege: Privilege, arguments: List<String>, serializer: KSerializer<T>, timeoutMillis: Long = TIMEOUT_MILLIS): EngineResult<T> {
         val output = privilege.execute(listOf(executable) + arguments + listOf("--store", STORE), timeoutMillis)
-        if (output.exitCode == ProcessRunner.TIMEOUT_EXIT_CODE && output.stdout.isBlank()) {
-            throw EngineException("timeout", "the engine did not finish in time: ${output.stderr.take(500)}", emptyList())
-        }
-        return result(decode(output.stdout), serializer)
+        if (output.exitCode == ProcessRunner.TIMEOUT_EXIT_CODE && output.stdout.isBlank()) throw timeout(output.stderr)
+        return result(decode(output.stdout, output.stderr), serializer)
     }
+
+    fun timeout(stderr: String) = EngineException("timeout", "the engine did not finish in time: ${stderr.take(MESSAGE_LENGTH)}", emptyList())
 
     suspend fun inspect(source: FontSource): EngineResult<FontInfo> = run(sourceArguments("inspect", source), FontInfo.serializer())
 
     suspend fun hash(source: FontSource): EngineResult<HashResult> = run(sourceArguments("hash", source), HashResult.serializer(), LONG_TIMEOUT_MILLIS)
 
-    suspend fun preset(preset: Preset): EngineResult<Config> {
-        val file = writeTemporary("preset.json", json.encodeToString(Preset.serializer(), preset))
-        return run(listOf("preset", file.absolutePath), Config.serializer())
+    suspend fun preset(preset: Preset): EngineResult<Config> = withTemporary("preset", json.encodeToString(Preset.serializer(), preset)) { file ->
+        run(listOf("preset", file.absolutePath), Config.serializer())
     }
 
-    suspend fun validate(config: Config): EngineResult<ValidationReport> {
-        val file = writeTemporary("validate.json", json.encodeToString(Config.serializer(), config))
-        return run(listOf("validate", file.absolutePath), ValidationReport.serializer())
+    suspend fun validate(config: Config): EngineResult<ValidationReport> = withTemporary("validate", json.encodeToString(Config.serializer(), config)) { file ->
+        run(listOf("validate", file.absolutePath), ValidationReport.serializer())
     }
 
     suspend fun version(): EngineResult<VersionReport> = run(listOf("version"), VersionReport.serializer())
@@ -83,12 +97,19 @@ class Engine(val context: Context) {
     suspend fun status(privilege: Privilege): EngineResult<StatusReport> = run(privilege, listOf("status"), StatusReport.serializer())
 
     suspend fun families(privilege: Privilege): EngineResult<List<FamilyInfo>> =
-        run(privilege, listOf("families"), kotlinx.serialization.builtins.ListSerializer(FamilyInfo.serializer()))
+        run(privilege, listOf("families"), ListSerializer(FamilyInfo.serializer()))
 
-    /** Applies `config`. The configuration file must stay readable by the privileged user, so it lives in the files directory. */
+    /**
+     * Applies `config`. The configuration file must stay readable by the privileged user, so it
+     * lives in the files directory; it is written whole before the engine reads it.
+     */
     suspend fun apply(privilege: Privilege, config: Config, boot: Boolean): EngineResult<ApplyReport> {
         val file = File(context.filesDir, APPLIED_CONFIG)
-        withContext(Dispatchers.IO) { file.writeText(json.encodeToString(Config.serializer(), config)) }
+        withContext(Dispatchers.IO) {
+            val temporary = File(context.filesDir, "$APPLIED_CONFIG.tmp")
+            temporary.writeText(json.encodeToString(Config.serializer(), config))
+            if (!temporary.renameTo(file)) throw EngineException("config", "cannot write $file", emptyList())
+        }
         val arguments = listOf("apply", file.absolutePath) + if (boot) listOf("--boot") else emptyList()
         return run(privilege, arguments, ApplyReport.serializer(), LONG_TIMEOUT_MILLIS)
     }
@@ -111,8 +132,20 @@ class Engine(val context: Context) {
         source.length?.let { addAll(listOf("--length", it.toString())) }
     }
 
-    suspend fun writeTemporary(name: String, text: String): File = withContext(Dispatchers.IO) {
-        File(context.cacheDir, name).apply { writeText(text) }
+    /**
+     * Runs `block` with a new file in the cache directory that holds `text`, and deletes the file
+     * afterwards. Each call has a file of its own, so that concurrent calls do not read each
+     * other's input.
+     */
+    suspend fun <T> withTemporary(prefix: String, text: String, block: suspend (File) -> T): T {
+        val file = withContext(Dispatchers.IO) {
+            File.createTempFile("$prefix-", ".json", context.cacheDir.apply { mkdirs() }).apply { writeText(text) }
+        }
+        try {
+            return block(file)
+        } finally {
+            withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+        }
     }
 
     companion object {
@@ -123,5 +156,8 @@ class Engine(val context: Context) {
 
         /** Applying installs fonts, which may take minutes for large fonts on slow storage. */
         const val LONG_TIMEOUT_MILLIS = 10 * 60_000L
+
+        /** How much of the output a message quotes. */
+        const val MESSAGE_LENGTH = 500
     }
 }

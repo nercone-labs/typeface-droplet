@@ -180,7 +180,7 @@ impl Guard {
     pub fn run(store: &FontStore, seconds: u32, target: GuardTarget, log: &mut Log) -> Result<GuardState, DropletError> {
         #[cfg(any(target_os = "linux", target_os = "android"))]
         {
-            let _ = rustix::process::setsid();
+            // The guard is the leader of a session of its own already (`Daemon::spawn`).
             // At a shutdown, init asks every process to end before it kills them. The guard
             // stays until it has seen the shutdown request and recorded that the watch was
             // interrupted, rather than tripped by the restart.

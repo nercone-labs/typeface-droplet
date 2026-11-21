@@ -1,5 +1,6 @@
 package dev.nercone.typefacedroplet.engine
 
+import java.security.MessageDigest
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -184,6 +185,20 @@ data class Config(
 
     /** The names of the roles some rule uses. */
     fun usedRoles(): Set<String> = rules.flatMapTo(mutableSetOf()) { it.action.roles }
+
+    /**
+     * A digest of what applying this configuration does: the fonts the roles use (by id, face
+     * index and family name), the roles, the rules and the options. Where a font file is
+     * (`FontEntry.source`) does not count, as the engine installs a copy and an update of the
+     * application moves the bundled fonts; neither do fonts no role uses, which the engine does
+     * not install. Two configurations with the same digest apply the same way.
+     */
+    fun digest(): String {
+        val used = roles.flatMapTo(mutableSetOf()) { role -> role.faces.map { it.font } }
+        val essence = copy(fonts = fonts.filter { it.id in used }.map { it.copy(source = FontSource("")) }.sortedBy { it.id })
+        val bytes = EngineJson.json.encodeToString(Config.serializer(), essence).toByteArray(Charsets.UTF_8)
+        return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    }
 
     companion object {
         const val VERSION = 1
