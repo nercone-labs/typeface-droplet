@@ -4,5 +4,6 @@ description = "Reader and table rewriter for OpenType, TrueType and font collect
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+repository.workspace = true
 
 [dependencies]

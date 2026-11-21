@@ -243,6 +243,7 @@
     <string name="settings_version">バージョン %1$s</string>
     <string name="settings_store_title">インストールしたフォント</string>
     <string name="settings_store">エンジンは、インストールしたフォントと起動時に適用する構成を %1$s に保存します。</string>
+    <string name="settings_source_title">ソースコード</string>
     <string name="settings_license_title">同梱フォント</string>
     <string name="settings_fonts_license">Nercone Sans・Serif・Mono CJK NF(SIL Open Font License 1.1)</string>
     <string name="settings_uninstall">root マネージャによる起動時の適用を使っている状態で TypeFace Droplet をアンインストールすると、次回の起動では元のフォントが使われ、起動完了後にエンジンが無効化したコンポーネントを元に戻し、自身のファイルを削除します。それ以外の場合は、コンポーネントを元に戻すため、アンインストールの前に元のフォントに戻してください。</string>

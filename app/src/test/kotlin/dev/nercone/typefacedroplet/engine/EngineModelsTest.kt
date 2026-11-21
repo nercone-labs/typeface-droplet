@@ -10,7 +10,7 @@ import org.junit.Test
 
 /**
  * The JSON exchanged with the engine must have exactly the shape the engine reads and writes
- * (crates/droplet/src/config.rs, state.rs, engine.rs). The expected documents below are written
+ * (crates/typeface-droplet/src/config.rs, state.rs, engine.rs). The expected documents below are written
  * from that format, not produced by this code.
  */
 class EngineModelsTest {

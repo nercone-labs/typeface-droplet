@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/sfnt", "crates/fontxml", "crates/mount", "crates/android", "crates/droplet"]
+members = ["crates/sfnt", "crates/fontxml", "crates/mount", "crates/android", "crates/typeface-droplet"]
 
 [workspace.package]
 version = "1.2.0"
 edition = "2024"
 authors = ["Nercone <nercone@nercone.dev>"]
-repository = "https://github.com/nercone-dev/typeface-droplet"
+repository = "https://github.com/nercone-labs/typeface-droplet"
 
 [workspace.dependencies]
 sfnt = { path = "crates/sfnt" }

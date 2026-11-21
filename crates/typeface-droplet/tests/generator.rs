@@ -5,11 +5,11 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
-use droplet::{
+use fontxml::{Document, Element, Family, Font};
+use typeface_droplet::{
     Action, AxisInfo, Config, DocumentKind, Face, FaceInfo, FaceStyle, FallbackEntry, FontEntry, FontKey, FontSource, Generator, InstalledFont, Matcher,
     Pattern, Preset, Role, Rule,
 };
-use fontxml::{Document, Element, Family, Font};
 
 const API33_FONTS: &str = include_str!("../../fontxml/tests/fixtures/api33/fonts.xml");
 const API35_FALLBACK: &str = include_str!("../../fontxml/tests/fixtures/api35/font_fallback.xml");
@@ -113,7 +113,7 @@ fn family(pattern: &str) -> Matcher {
     Matcher::Family(Pattern::new(pattern))
 }
 
-fn generate(kind: DocumentKind, api: u32, config: &Config, source: &str) -> (String, Document, droplet::GenerationReport) {
+fn generate(kind: DocumentKind, api: u32, config: &Config, source: &str) -> (String, Document, typeface_droplet::GenerationReport) {
     let fonts = fonts();
     let mut generator = Generator::new(kind, api, config, &fonts);
     let text = generator.generate(&Document::parse(source).unwrap()).unwrap();

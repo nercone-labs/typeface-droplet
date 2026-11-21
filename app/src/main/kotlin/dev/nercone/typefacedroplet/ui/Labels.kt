@@ -10,46 +10,9 @@ import dev.nercone.typefacedroplet.engine.FaceInfo
 import dev.nercone.typefacedroplet.engine.FaceStyle
 import dev.nercone.typefacedroplet.engine.Matcher
 import dev.nercone.typefacedroplet.engine.RootManager
-import dev.nercone.typefacedroplet.privilege.Privilege
-import dev.nercone.typefacedroplet.privilege.PrivilegeChoice
-import dev.nercone.typefacedroplet.privilege.PrivilegeStatus
 
 /** The words the screens use for the values of the application, the same on every screen. */
 object Labels {
-    @Composable
-    fun privilege(kind: Privilege.Kind): String = stringResource(
-        when (kind) {
-            Privilege.Kind.ROOT -> R.string.privilege_root
-            Privilege.Kind.SHIZUKU -> R.string.privilege_shizuku
-            Privilege.Kind.SUI -> R.string.privilege_sui
-        },
-    )
-
-    @Composable
-    fun privilegeChoice(choice: PrivilegeChoice): String = stringResource(
-        when (choice) {
-            PrivilegeChoice.AUTOMATIC -> R.string.settings_privilege_automatic
-            PrivilegeChoice.SHIZUKU -> R.string.settings_privilege_shizuku
-            PrivilegeChoice.ROOT -> R.string.settings_privilege_root
-        },
-    )
-
-    @Composable
-    fun describe(status: PrivilegeStatus): String = when (status) {
-        is PrivilegeStatus.Available -> stringResource(R.string.privilege_available)
-        is PrivilegeStatus.InsufficientUser ->
-            if (status.uid == Privilege.SHELL_UID) stringResource(R.string.privilege_shizuku_adb) else stringResource(R.string.privilege_wrong_user, status.uid)
-        PrivilegeStatus.PermissionRequired -> stringResource(R.string.privilege_permission_required)
-        is PrivilegeStatus.Unavailable -> stringResource(
-            when (status.reason) {
-                PrivilegeStatus.Reason.NOT_INSTALLED -> R.string.privilege_not_installed
-                PrivilegeStatus.Reason.NOT_RUNNING -> R.string.privilege_not_running
-                PrivilegeStatus.Reason.DENIED -> R.string.privilege_denied
-                PrivilegeStatus.Reason.OUTDATED -> R.string.privilege_outdated
-            },
-        )
-    }
-
     @Composable
     fun rootManager(manager: RootManager): String = stringResource(
         when (manager) {

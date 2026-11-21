@@ -1,12 +1,13 @@
 [package]
-name = "droplet"
+name = "typeface-droplet"
 description = "TypeFace Droplet engine: replaces Android system fonts at runtime, without a reboot"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+repository.workspace = true
 
 [[bin]]
-name = "droplet"
+name = "typeface-droplet"
 path = "src/main.rs"
 
 [dependencies]

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">TypeFace Droplet</string>
+    <string name="app_name" translatable="false">TypeFace Droplet</string>
     <string name="notification_channel">Status</string>
     <string name="boot_not_reloaded">The fonts were applied after the boot, but the font service did not reload them. Open TypeFace Droplet to restart the system softly.</string>
     <string name="boot_failed">The fonts could not be applied after the boot: %1$s</string>
@@ -244,6 +244,7 @@
     <string name="settings_version">Version %1$s</string>
     <string name="settings_store_title">Installed fonts</string>
     <string name="settings_store">The engine keeps installed fonts and the configuration applied at boot in %1$s.</string>
+    <string name="settings_source_title">Source code</string>
     <string name="settings_license_title">Bundled fonts</string>
     <string name="settings_fonts_license">Nercone Sans, Serif and Mono CJK NF, licensed under the SIL Open Font License 1.1.</string>
     <string name="settings_uninstall">When TypeFace Droplet is uninstalled while it applies fonts at boot through a root manager, the next boot uses the original fonts, and once the system has started, the engine re-enables the components it disabled and removes its files. Otherwise, restore the original fonts before uninstalling, so that the components are enabled again.</string>

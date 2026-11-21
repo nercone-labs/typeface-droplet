@@ -38,17 +38,4 @@ impl Daemon {
     fn detach(command: &mut Command) {
         command.process_group(0);
     }
-
-    /// The arguments of the process `pid`, without the program, or `None` if it is gone.
-    pub fn arguments(pid: u32) -> Option<Vec<String>> {
-        let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-        Some(
-            cmdline
-                .split(|byte| *byte == 0)
-                .skip(1)
-                .filter(|argument| !argument.is_empty())
-                .map(|argument| String::from_utf8_lossy(argument).into_owned())
-                .collect(),
-        )
-    }
 }

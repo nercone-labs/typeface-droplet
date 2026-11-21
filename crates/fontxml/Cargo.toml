@@ -4,6 +4,7 @@ description = "Lossless reader and editor for Android font configuration XML (fo
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+repository.workspace = true
 
 [dependencies]
 quick-xml.workspace = true

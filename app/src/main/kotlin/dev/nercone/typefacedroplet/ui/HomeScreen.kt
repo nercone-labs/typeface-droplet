@@ -1,46 +1,24 @@
 package dev.nercone.typefacedroplet.ui
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Notes
-import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ContainedLoadingIndicator
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -56,8 +34,6 @@ import dev.nercone.typefacedroplet.engine.FaceStyle
 import dev.nercone.typefacedroplet.engine.GuardState
 import dev.nercone.typefacedroplet.library.FontLibrary
 import dev.nercone.typefacedroplet.library.LibraryFont
-import dev.nercone.typefacedroplet.privilege.PrivilegeSelection
-import dev.nercone.typefacedroplet.privilege.PrivilegeStatus
 import dev.nercone.typefacedroplet.ui.Notices.notices
 
 /**
@@ -90,7 +66,7 @@ object HomeScreen {
             val main: @Composable () -> Unit = {
                 Column(verticalArrangement = Arrangement.spacedBy(Widgets.SPACING)) {
                     Verdict(condition, data, selection, library, model)
-                    if (condition == Condition.NO_PRIVILEGE) state.privilege?.let { Setup(it, onGrant = model::grantShizuku, onRecheck = model::recheck) }
+                    if (condition == Condition.NO_PRIVILEGE) state.privilege?.let { Privileges.Setup(it, onGrant = model::grantShizuku, onRecheck = model::recheck) }
                     Details(data, model) { page -> navigator.open(DropletApp.Destination.SETTINGS, page) }
                 }
             }
@@ -112,105 +88,47 @@ object HomeScreen {
     }
 
     /** The verdict: which fonts the system uses, what happens at boot, and the actions. */
-    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
     @Composable
     fun Verdict(condition: Condition, data: ScreenData, selection: Selection, library: FontLibrary, model: AppViewModel) {
         val state = data.state
-        val active = condition == Condition.ACTIVE
-        val failing = condition == Condition.TRIPPED || condition == Condition.NO_PRIVILEGE || condition == Condition.RESTRICTED || condition == Condition.UNREADABLE
-        val container by animateColorAsState(
-            when {
-                active -> MaterialTheme.colorScheme.primaryContainer
-                failing -> MaterialTheme.colorScheme.errorContainer
-                else -> MaterialTheme.colorScheme.surface
-            },
-            MaterialTheme.motionScheme.defaultEffectsSpec(),
-            label = "container",
-        )
-        val rotation by animateFloatAsState(if (active) 45f else 0f, MaterialTheme.motionScheme.slowSpatialSpec(), label = "rotation")
         val sans = data.fonts.firstOrNull { it.id == selection.font(Slot(Category.SANS, FaceStyle.NORMAL)) }
         val family = Previews.family(library, sans, italic = false)
-        val busy = state.operation != null || condition == Condition.PREPARING || condition == Condition.CHECKING
-        Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.extraLarge, color = container) {
-            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                    Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
-                        if (busy) {
-                            ContainedLoadingIndicator(Modifier.size(72.dp))
-                        } else {
-                            Box(
-                                Modifier.size(72.dp).rotate(rotation).clip(MaterialShapes.Cookie9Sided.toShape()).background(
-                                    if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                ),
-                            )
-                            Text(
-                                "Aa",
-                                fontSize = 28.sp,
-                                fontFamily = family ?: FontFamily.Default,
-                                color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.surface,
-                            )
-                        }
-                    }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(title(condition)), style = MaterialTheme.typography.headlineSmall)
-                        Text(state.operation?.let { Labels.operation(it) } ?: description(condition, data), style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-                state.statusError?.takeIf { condition == Condition.UNREADABLE }?.let { Text(it.text, style = MaterialTheme.typography.bodySmall) }
-                Actions(condition, data, model)
-            }
-        }
+        Widgets.Hero(
+            mood = mood(condition),
+            busy = state.operation != null || condition == Condition.PREPARING || condition == Condition.CHECKING,
+            title = stringResource(title(condition)),
+            text = state.operation?.let { Labels.operation(it) } ?: description(condition, data),
+            detail = state.statusError?.takeIf { condition == Condition.UNREADABLE }?.text,
+            actions = actions(condition, data, model),
+        ) { color -> Text("Aa", fontSize = 28.sp, fontFamily = family ?: FontFamily.Default, color = color) }
     }
 
-    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
+    fun mood(condition: Condition): Widgets.Mood = when (condition) {
+        Condition.ACTIVE -> Widgets.Mood.GOOD
+        Condition.TRIPPED, Condition.NO_PRIVILEGE, Condition.RESTRICTED, Condition.UNREADABLE -> Widgets.Mood.BAD
+        Condition.PREPARING, Condition.CHECKING, Condition.ORIGINAL -> Widgets.Mood.NEUTRAL
+    }
+
     @Composable
-    fun Actions(condition: Condition, data: ScreenData, model: AppViewModel) {
+    fun actions(condition: Condition, data: ScreenData, model: AppViewModel): List<Widgets.Action> {
         val state = data.state
         when {
-            condition == Condition.NO_PRIVILEGE || condition == Condition.PREPARING -> return
+            condition == Condition.NO_PRIVILEGE || condition == Condition.PREPARING -> return emptyList()
             // Nothing can be applied without the configuration, which Check again loads again.
-            condition == Condition.UNREADABLE || condition == Condition.RESTRICTED || state.preparationError != null -> {
-                FilledTonalButton(onClick = model::recheck, enabled = state.operation == null) { Text(stringResource(R.string.check_again)) }
-                return
-            }
+            condition == Condition.UNREADABLE || condition == Condition.RESTRICTED || state.preparationError != null ->
+                return listOf(Widgets.Action(stringResource(R.string.check_again), Icons.Default.Refresh, state.operation == null, model::recheck))
         }
         // Restoring also re-enables components and forgets the saved configuration, which stay after a reboot or a tripped guard.
         val restorable = state.status?.let { it.applied || it.saved || it.components.isNotEmpty() } == true
-        val height = ButtonDefaults.MediumContainerHeight
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ActionButton(
-                primary = true,
-                icon = Icons.Default.Check,
-                text = stringResource(if (condition == Condition.ACTIVE) R.string.apply_again else R.string.apply),
-                enabled = state.idle && data.config != null && state.status != null,
-                onClick = model::apply,
-                modifier = Modifier.weight(1f).heightIn(min = height),
-            )
-            ActionButton(
-                primary = false,
-                icon = Icons.Default.Restore,
-                text = stringResource(R.string.revert),
-                enabled = state.idle && restorable,
-                onClick = model::revert,
-                modifier = Modifier.weight(1f).heightIn(min = height),
-            )
-        }
-    }
-
-    @OptIn(ExperimentalMaterial3ExpressiveApi::class)
-    @Composable
-    fun ActionButton(primary: Boolean, icon: ImageVector, text: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier) {
-        val height = ButtonDefaults.MediumContainerHeight
-        val content: @Composable () -> Unit = {
-            Icon(icon, null, Modifier.size(ButtonDefaults.iconSizeFor(height)))
-            Spacer(Modifier.size(ButtonDefaults.iconSpacingFor(height)))
-            Text(text, style = ButtonDefaults.textStyleFor(height), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        if (primary) {
-            Button(onClick = onClick, enabled = enabled, shapes = ButtonDefaults.shapes(), contentPadding = ButtonDefaults.contentPaddingFor(height), modifier = modifier) { content() }
-        } else {
-            FilledTonalButton(onClick = onClick, enabled = enabled, shapes = ButtonDefaults.shapes(), contentPadding = ButtonDefaults.contentPaddingFor(height), modifier = modifier) { content() }
-        }
+        return listOf(
+            Widgets.Action(
+                stringResource(if (condition == Condition.ACTIVE) R.string.apply_again else R.string.apply),
+                Icons.Default.Check,
+                state.idle && data.config != null && state.status != null,
+                model::apply,
+            ),
+            Widgets.Action(stringResource(R.string.revert), Icons.Default.Restore, state.idle && restorable, model::revert),
+        )
     }
 
     fun title(condition: Condition): Int = when (condition) {
@@ -243,30 +161,6 @@ object HomeScreen {
         Condition.ORIGINAL -> stringResource(R.string.hero_original_text)
     }
 
-    /** Guides the user to a privilege: what each candidate says, and what to do. */
-    @Composable
-    fun Setup(selection: PrivilegeSelection, onGrant: () -> Unit, onRecheck: () -> Unit) {
-        Column(verticalArrangement = Arrangement.spacedBy(Widgets.SPACING)) {
-            Widgets.Section(stringResource(R.string.setup_title), stringResource(R.string.setup_help)) {
-                selection.statuses.forEachIndexed { index, (kind, status) ->
-                    Widgets.Item(
-                        index = index,
-                        count = selection.statuses.size,
-                        headline = Labels.privilege(kind),
-                        supporting = Labels.describe(status),
-                        icon = Icons.Default.AdminPanelSettings,
-                        trailing = if (status == PrivilegeStatus.PermissionRequired) {
-                            { FilledTonalButton(onClick = onGrant) { Text(stringResource(R.string.grant)) } }
-                        } else {
-                            null
-                        },
-                    )
-                }
-            }
-            FlowRow(Modifier.padding(horizontal = 8.dp)) { TextButton(onClick = onRecheck) { Text(stringResource(R.string.check_again)) } }
-        }
-    }
-
     /** The details of the state, each opening the page of the settings it is about. */
     @Composable
     fun Details(data: ScreenData, model: AppViewModel, onSettings: (SettingsScreen.Page) -> Unit) {
@@ -277,7 +171,7 @@ object HomeScreen {
                 Widgets.Item(
                     index, count,
                     headline = stringResource(R.string.detail_privilege),
-                    supporting = state.privilege?.privilege?.let { stringResource(R.string.privilege_runs_as_root, Labels.privilege(it.kind)) } ?: stringResource(R.string.privilege_none_short),
+                    supporting = Privileges.current(state.privilege),
                     icon = Icons.Default.Security,
                     onClick = { onSettings(SettingsScreen.Page.PRIVILEGE) },
                 )

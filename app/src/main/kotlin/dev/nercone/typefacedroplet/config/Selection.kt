@@ -23,14 +23,14 @@ data class Slot(val category: Category, val style: FaceStyle) {
 
 /**
  * The fonts chosen for the slots, by font id. This is all a user has to decide: the
- * recommended configuration derives the roles and rules from it (see `droplet preset`).
+ * recommended configuration derives the roles and rules from it (see `typeface-droplet preset`).
  */
 data class Selection(val fonts: Map<Slot, String> = emptyMap()) {
     fun font(slot: Slot): String? = fonts[slot]
 
     fun with(slot: Slot, font: String?): Selection = Selection(if (font == null) fonts - slot else fonts + (slot to font))
 
-    /** The input of `droplet preset`, with the font entries (and their family names) of `config`. */
+    /** The input of `typeface-droplet preset`, with the font entries (and their family names) of `config`. */
     fun preset(config: Config): Preset {
         fun entry(category: Category, style: FaceStyle) = font(Slot(category, style))?.let { id -> config.font(id) }
         return Preset(
