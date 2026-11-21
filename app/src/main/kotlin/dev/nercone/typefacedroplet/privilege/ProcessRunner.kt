@@ -9,10 +9,14 @@ object ProcessRunner {
     /** The exit code reported when the process did not finish in time and was killed. */
     const val TIMEOUT_EXIT_CODE = -1
 
+    /** The exit code reported when the process could not be started; the error is in stderr. */
+    const val START_FAILURE_EXIT_CODE = -2
+
     /**
-     * How long the output is still read after a process that timed out was killed. A child of the
-     * killed process (the engine started by `su`) may keep the output open, and the caller must
-     * not wait for it without end.
+     * How long the output is still read after the process ended, for both outputs together. A
+     * child of the process (the engine started by `su`) may keep the output open after the
+     * process itself ended or was killed, and the caller must not wait for it without end. An
+     * output still open then is reported as empty.
      */
     const val DRAIN_MILLIS = 5_000L
 
@@ -21,18 +25,19 @@ object ProcessRunner {
         process.outputStream.close()
         val stdout = AtomicReference("")
         val stderr = AtomicReference("")
+        // The readers are daemons, so that one still blocked by such a child does not keep the
+        // process of the application alive; a failed read leaves the output empty.
         val readers = listOf(
-            thread(name = "stdout", isDaemon = true) { stdout.set(process.inputStream.bufferedReader().readText()) },
-            thread(name = "stderr", isDaemon = true) { stderr.set(process.errorStream.bufferedReader().readText()) },
+            thread(name = "stdout", isDaemon = true) { stdout.set(runCatching { process.inputStream.bufferedReader().readText() }.getOrDefault("")) },
+            thread(name = "stderr", isDaemon = true) { stderr.set(runCatching { process.errorStream.bufferedReader().readText() }.getOrDefault("")) },
         )
         val finished = process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
-        if (finished) {
-            readers.forEach { it.join() }
-        } else {
+        if (!finished) {
             process.destroyForcibly()
             process.waitFor()
-            readers.forEach { it.join(DRAIN_MILLIS) }
         }
+        val deadline = System.nanoTime() + DRAIN_MILLIS * 1_000_000
+        readers.forEach { it.join(maxOf(1L, (deadline - System.nanoTime()) / 1_000_000)) }
         return CommandResult(if (finished) process.exitValue() else TIMEOUT_EXIT_CODE, stdout.get(), stderr.get())
     }
 }

@@ -9,7 +9,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
-/** Material 3 Expressive with the colors of the wallpaper (Material You) and the expressive motion. */
+/** Material 3 Expressive with the colors of the wallpaper (Material You) and expressive motion. */
 object DropletTheme {
     @OptIn(ExperimentalMaterial3ExpressiveApi::class)
     @Composable

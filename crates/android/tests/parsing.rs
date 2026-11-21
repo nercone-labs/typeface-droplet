@@ -1,7 +1,8 @@
 //! Tests of the parsers of Android system program output, using output captured from
-//! Android 17 (API 37) and the formats documented by `cmd package help`.
+//! Android 17 (API 37), the formats documented by `cmd package help`, and the format of
+//! `/data/system/packages.list` written by `PackageManagerService` (`Settings.writePackageListLPr`).
 
-use android::{Capability, CapabilitySet, ComponentName, ComponentState, FontService, PackageManager, ProcessCapabilities, ProcessInfo};
+use android::{Capability, CapabilitySet, ComponentName, ComponentState, FontService, PackageList, PackageManager, ProcessCapabilities, ProcessInfo};
 
 #[test]
 fn component_names_expand_relative_classes() {
@@ -223,4 +224,40 @@ fn package_names_are_read_from_package_lines() {
     let output = "package:com.android.systemui\npackage:android\n\npackage:\nWARNING: linker\n";
     assert_eq!(PackageManager::parse_packages(output), ["com.android.systemui", "android"]);
     assert!(PackageManager::parse_packages("").is_empty());
+}
+
+#[test]
+fn package_list_lines_give_names_and_application_ids() {
+    // `name uid debuggable dataDir seinfo gids profileable versionCode isSystem installer`.
+    let list = "com.google.android.gms 10145 0 /data/user/0/com.google.android.gms default:privapp:targetSdkVersion=36 3002,3003 0 254832035 1 com.android.vending\n\
+                com.google.android.gsf 10145 0 /data/user/0/com.google.android.gsf default:privapp:targetSdkVersion=36 3003 0 36 1 @system\n\
+                com.android.vending 10160 0 /data/user/0/com.android.vending default:privapp:targetSdkVersion=36 none 0 84831230 1 @system\n\
+                \n\
+                broken\n\
+                bad.uid abc 0 /data\n";
+    let packages = PackageList::parse(list);
+    assert_eq!(packages.len(), 3);
+    assert_eq!(packages[0].name, "com.google.android.gms");
+    assert_eq!(packages[0].app_id, 10145);
+    assert_eq!(PackageList::app_id_of(&packages, "com.android.vending"), Some(10160));
+    assert_eq!(PackageList::app_id_of(&packages, "missing"), None);
+}
+
+#[test]
+fn uids_combine_users_and_application_ids() {
+    // `UserHandle.getUid`: userId * PER_USER_RANGE + appId.
+    assert_eq!(PackageList::uid(0, 10145), 10145);
+    assert_eq!(PackageList::uid(10, 10145), 1_010_145);
+    assert_eq!(PackageList::app_id(1_010_145), 10145);
+}
+
+#[test]
+fn command_lines_split_into_their_arguments() {
+    // `/proc/<pid>/cmdline` ends every argument with a NUL.
+    assert_eq!(ProcessInfo::arguments_of(b"/data/adb/example/engine\0watch\0--package\0a.b\0"), ["/data/adb/example/engine", "watch", "--package", "a.b"]);
+    // An empty argument is kept; a process without a command line (a kernel thread) has none.
+    assert_eq!(ProcessInfo::arguments_of(b"sh\0\0x\0"), ["sh", "", "x"]);
+    assert!(ProcessInfo::arguments_of(b"").is_empty());
+    // A process that rewrote its command line may lack the final NUL.
+    assert_eq!(ProcessInfo::arguments_of(b"name"), ["name"]);
 }
