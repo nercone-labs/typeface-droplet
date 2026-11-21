@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -315,7 +316,7 @@ object CustomizeScreen {
             }
             Text(stringResource(R.string.role_axes), style = MaterialTheme.typography.titleMedium)
             Text(stringResource(R.string.role_axes_help), style = MaterialTheme.typography.bodySmall, color = Widgets.secondary)
-            Widgets.Axes(axes) { axes = it }
+            Axes(axes) { axes = it }
             if (original != null) FilledTonalButton(onClick = { confirm = true }) { Text(stringResource(R.string.role_delete)) }
         }
         if (confirm) Widgets.Confirm(stringResource(R.string.role_delete), stringResource(R.string.role_delete_text), stringResource(R.string.remove), onDelete) { confirm = false }
@@ -351,12 +352,12 @@ object CustomizeScreen {
                 },
                 label = { Text(stringResource(R.string.face_weight)) },
                 supportingText = { Text(stringResource(R.string.face_weight_help)) },
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(stringResource(R.string.face_axes), style = MaterialTheme.typography.bodySmall, color = Widgets.secondary)
-            Widgets.Axes(face.axes) { onChange(face.copy(axes = it)) }
+            Axes(face.axes) { onChange(face.copy(axes = it)) }
         }
     }
 
@@ -483,5 +484,41 @@ object CustomizeScreen {
             },
             dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
         )
+    }
+
+    /**
+     * An editor of fixed variation axis values (`tag` → value). Tags `wght` and `ital` are
+     * refused, because weights and styles control them.
+     */
+    @Composable
+    fun Axes(axes: Map<String, Float>, onChange: (Map<String, Float>) -> Unit) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            axes.forEach { (tag, value) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("$tag = $value", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    IconButton(onClick = { onChange(axes - tag) }) { Icon(Icons.Default.Close, stringResource(R.string.remove)) }
+                }
+            }
+            var tag by rememberSaveable { mutableStateOf("") }
+            var value by rememberSaveable { mutableStateOf("") }
+            val number = value.toFloatOrNull()
+            val valid = tag.length in 1..4 && tag.all { it.code in 0x20..0x7E } && tag != "wght" && tag != "ital" && number != null && number.isFinite()
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(tag, { tag = it.take(4) }, label = { Text(stringResource(R.string.axis_tag)) }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(
+                    value,
+                    { value = it },
+                    label = { Text(stringResource(R.string.axis_value)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(enabled = valid, onClick = {
+                    number?.let { onChange(axes + (tag to it)) }
+                    tag = ""
+                    value = ""
+                }) { Icon(Icons.Default.Add, stringResource(R.string.add)) }
+            }
+        }
     }
 }

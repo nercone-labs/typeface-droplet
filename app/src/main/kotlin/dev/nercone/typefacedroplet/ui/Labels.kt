@@ -51,15 +51,16 @@ object Labels {
     }
 
     @Composable
-    fun rootManagers(managers: List<RootManager>): String = managers.map { manager ->
-        stringResource(
-            when (manager) {
-                RootManager.MAGISK -> R.string.manager_magisk
-                RootManager.KERNEL_SU -> R.string.manager_kernelsu
-                RootManager.APATCH -> R.string.manager_apatch
-            },
-        )
-    }.joinToString(" / ")
+    fun rootManager(manager: RootManager): String = stringResource(
+        when (manager) {
+            RootManager.MAGISK -> R.string.manager_magisk
+            RootManager.KERNEL_SU -> R.string.manager_kernelsu
+            RootManager.APATCH -> R.string.manager_apatch
+        },
+    )
+
+    @Composable
+    fun rootManagers(managers: List<RootManager>): String = managers.map { rootManager(it) }.joinToString(" / ")
 
     @Composable
     fun category(category: Category): String = stringResource(

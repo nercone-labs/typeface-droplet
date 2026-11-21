@@ -94,7 +94,9 @@ object Widgets {
      * the window. A screen that lays its items out in columns when there is room passes
      * `columnsWidth`, the width it is centred at instead when the window has room for
      * `TWO_COLUMNS`; `content` receives the width the list has, to decide. `spacing` is the gap
-     * between items; `bottom` is the room under the last one (more under a floating action button).
+     * between items: a screen whose items form one segmented group (a long list) passes the gap of
+     * such a group, and spaces its other items itself. `bottom` is the room under the last item
+     * (more under a floating action button).
      */
     @Composable
     fun Screen(
@@ -215,6 +217,7 @@ object Widgets {
     /**
      * An item that shows the chosen one of `options` and opens a dialog to choose another. The
      * dialog lists every option with `help` under it, and `description` above them all.
+     * `supporting` replaces the name of the chosen option under the headline.
      */
     @Composable
     fun <T> ChoiceItem(
@@ -226,12 +229,14 @@ object Widgets {
         describe: @Composable (T) -> String,
         onSelect: (T) -> Unit,
         icon: ImageVector? = null,
+        supporting: String? = null,
         description: String? = null,
         help: (@Composable (T) -> String?)? = null,
         enabled: Boolean = true,
+        trailing: (@Composable () -> Unit)? = null,
     ) {
         var open by rememberSaveable { mutableStateOf(false) }
-        Item(index, count, headline, describe(selected), icon, enabled, onClick = { open = true })
+        Item(index, count, headline, supporting ?: describe(selected), icon, enabled, trailing, onClick = { open = true })
         if (open) ChoiceDialog(headline, description, options, selected, describe, help, onSelect = { onSelect(it); open = false }, onDismiss = { open = false })
     }
 
@@ -271,6 +276,51 @@ object Widgets {
             },
             confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
         )
+    }
+
+    /**
+     * An item that shows a text setting of one word, such as a URL, and opens a dialog to edit
+     * it. The text is trimmed as it is typed. `onSave` receives the text when it is valid and the
+     * user confirms it.
+     */
+    @Composable
+    fun TextItem(
+        index: Int,
+        count: Int,
+        headline: String,
+        value: String,
+        validate: (String) -> Boolean,
+        onSave: (String) -> Unit,
+        icon: ImageVector? = null,
+        keyboardType: KeyboardType = KeyboardType.Text,
+    ) {
+        var open by rememberSaveable { mutableStateOf(false) }
+        Item(index, count, headline, value, icon, onClick = { open = true })
+        if (open) {
+            var text by rememberSaveable { mutableStateOf(value) }
+            val valid = validate(text)
+            AlertDialog(
+                onDismissRequest = { open = false },
+                title = { Text(headline) },
+                text = {
+                    OutlinedTextField(
+                        text,
+                        { text = it.trim() },
+                        singleLine = true,
+                        isError = !valid,
+                        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                },
+                confirmButton = {
+                    TextButton(enabled = valid, onClick = {
+                        if (text != value) onSave(text)
+                        open = false
+                    }) { Text(stringResource(R.string.save)) }
+                },
+                dismissButton = { TextButton(onClick = { open = false }) { Text(stringResource(R.string.cancel)) } },
+            )
+        }
     }
 
     /** A message in a tinted container, with optional actions below it. */
@@ -468,42 +518,6 @@ object Widgets {
                         content = content,
                     )
                 }
-            }
-        }
-    }
-
-    /**
-     * An editor of fixed variation axis values (`tag` → value). Tags `wght` and `ital` are
-     * refused, because weights and styles control them.
-     */
-    @Composable
-    fun Axes(axes: Map<String, Float>, onChange: (Map<String, Float>) -> Unit) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            axes.forEach { (tag, value) ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("$tag = $value", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    IconButton(onClick = { onChange(axes - tag) }) { Icon(Icons.Default.Close, stringResource(R.string.remove)) }
-                }
-            }
-            var tag by rememberSaveable { mutableStateOf("") }
-            var value by rememberSaveable { mutableStateOf("") }
-            val number = value.toFloatOrNull()
-            val valid = tag.length in 1..4 && tag.all { it.code in 0x20..0x7E } && tag != "wght" && tag != "ital" && number != null && number.isFinite()
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(tag, { tag = it.take(4) }, label = { Text(stringResource(R.string.axis_tag)) }, singleLine = true, modifier = Modifier.weight(1f))
-                OutlinedTextField(
-                    value,
-                    { value = it },
-                    label = { Text(stringResource(R.string.axis_value)) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(enabled = valid, onClick = {
-                    number?.let { onChange(axes + (tag to it)) }
-                    tag = ""
-                    value = ""
-                }) { Icon(Icons.Default.Add, stringResource(R.string.add)) }
             }
         }
     }

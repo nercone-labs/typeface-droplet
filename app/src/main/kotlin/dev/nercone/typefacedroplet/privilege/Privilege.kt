@@ -40,7 +40,7 @@ sealed interface PrivilegeStatus {
     /** Commands run as `uid`, which is `Privilege.REQUIRED_UID`. */
     data class Available(val uid: Int) : PrivilegeStatus
 
-    /** The privilege works, but runs commands as a user that cannot apply fonts (Shizuku started through ADB). */
+    /** The privilege works, but runs commands as a user that cannot act as root (Shizuku started through ADB). */
     data class InsufficientUser(val uid: Int) : PrivilegeStatus
 
     /** The user has to grant this application access first. */

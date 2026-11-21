@@ -74,6 +74,9 @@ class Engine(val context: Context) {
     /** Runs the engine through `privilege`. */
     suspend fun <T> run(privilege: Privilege, arguments: List<String>, serializer: KSerializer<T>, timeoutMillis: Long = TIMEOUT_MILLIS): EngineResult<T> {
         val output = privilege.execute(listOf(executable) + arguments + listOf("--store", STORE), timeoutMillis)
+        if (output.exitCode == ProcessRunner.START_FAILURE_EXIT_CODE && output.stdout.isBlank()) {
+            throw EngineException("output", "the engine could not be started: ${output.stderr.take(MESSAGE_LENGTH)}", emptyList())
+        }
         if (output.exitCode == ProcessRunner.TIMEOUT_EXIT_CODE && output.stdout.isBlank()) throw timeout(output.stderr)
         return result(decode(output.stdout, output.stderr), serializer)
     }
