@@ -1,11 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The notification icon of TypeFace Droplet: the outlined hexagon with "Tf", filled so that it stays legible at 24 dp. Drawn from website/public/static/assets/images/projects/labs/typeface-droplet/icon.svg of nercone-dev. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="1024"
     android:viewportHeight="1024">
     <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="56"
+        android:strokeLineJoin="round"
+        android:pathData="M770.65,160l175.51,304c17.15,29.7,17.15,66.3,0,96l-175.51,304c-17.15,29.7-48.84,48-83.14,48h-351.03c-34.3,0-65.99-18.3-83.14-48l-175.51-304c-17.15-29.7-17.15-66.3,0-96L253.35,160c17.15-29.7,48.84-48,83.14-48h351.03c34.3,0,65.99,18.3,83.14,48Z" />
+    <path
         android:fillColor="#FFFFFFFF"
-        android:fillType="evenOdd"
-        android:pathData="M742.94,112 L973.88,512 L742.94,912 L281.06,912 L50.12,512 L281.06,112 Z M297.77,392.91 L297.77,356 L545.18,356 L545.18,392.91 L442.57,392.91 L442.57,683.39 L400.82,683.39 L400.82,392.91 Z" />
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="16"
+        android:strokeMiterLimit="10"
+        android:pathData="M270.99,370.02v-25.53c0-4.42,3.58-8,8-8h262.34c4.42,0,8,3.58,8,8v25.53c0,4.42-3.58,8-8,8h-107.44v318.79c0,4.42-3.58,8-8,8h-30.97c-4.42,0-8-3.58-8-8v-318.79h-107.93c-4.42,0-8-3.58-8-8Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="16"
+        android:strokeMiterLimit="10"
+        android:pathData="M741.15,436.45v22.07c0,4.42-3.58,8-8,8h-146.65c-4.42,0-8-3.58-8-8v-22.07c0-4.42,3.58-8,8-8h146.65c4.42,0,8,3.58,8,8ZM640.88,704.81c-4.42,0-8-3.58-8-8v-305.19c0-15.98,3.75-29.33,11.25-40.05,7.5-10.71,17.26-18.79,29.29-24.22,12.03-5.44,24.72-8.16,38.07-8.16,10.54,0,19.28.87,26.2,2.6,2.83.71,5.36,1.39,7.58,2.06,4.32,1.29,6.74,5.86,5.35,10.14l-7.53,23.19c-1.32,4.08-5.62,6.38-9.75,5.24-.55-.15-1.12-.31-1.71-.46-3.71-.99-8.69-1.48-14.96-1.48-13.68,0-23.65,3.5-29.91,10.51-6.26,7.01-9.39,17.18-9.39,30.53v295.31c0,4.42-3.58,8-8,8h-28.49Z" />
 </vector>

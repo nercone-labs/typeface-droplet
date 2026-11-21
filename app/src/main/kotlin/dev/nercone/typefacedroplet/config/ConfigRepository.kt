@@ -75,11 +75,7 @@ class ConfigRepository(context: Context) {
 
     /** Writes `next` whole (to a temporary file that replaces the old one), then publishes it. */
     private suspend fun write(next: Config) {
-        withContext(Dispatchers.IO) {
-            val temporary = File(file.parentFile, "$FILE.tmp")
-            temporary.writeText(EngineJson.json.encodeToString(Config.serializer(), next))
-            if (!temporary.renameTo(file)) throw IOException("cannot save $file")
-        }
+        withContext(Dispatchers.IO) { DurableFile.write(file, EngineJson.json.encodeToString(Config.serializer(), next)) }
         state.value = next
     }
 

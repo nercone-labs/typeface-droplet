@@ -70,7 +70,10 @@ impl FontStore {
     /// The version of the way installed fonts are written. It is part of their file names, so
     /// that a change of the writing never reuses a font written the old way.
     pub const FORMAT: u32 = 1;
-    pub const EXECUTABLE: &'static str = "droplet";
+    pub const EXECUTABLE: &'static str = "typeface-droplet";
+    /// The names earlier versions gave the copy of the engine, removed once the boot hook runs
+    /// the copy named `EXECUTABLE`.
+    pub const LEGACY_EXECUTABLES: [&'static str; 1] = ["droplet"];
     pub const EXECUTABLE_MODE: u32 = 0o700;
 
     pub fn new(root: impl Into<PathBuf>, context: Option<String>) -> FontStore {
@@ -222,6 +225,19 @@ impl FontStore {
         File::open(&temporary).and_then(|file| file.sync_all()).map_err(|error| DropletError::io_at("write", &temporary, error))?;
         fs::rename(&temporary, &target).map_err(|error| DropletError::io_at("rename", &temporary, error))?;
         Ok(target)
+    }
+
+    /// Removes the copies of the engine that earlier versions installed under other names
+    /// (`LEGACY_EXECUTABLES`). Called once no boot script runs them any more.
+    pub fn remove_legacy_executables(&self) -> Result<(), DropletError> {
+        for name in FontStore::LEGACY_EXECUTABLES {
+            let path = self.root.join("bin").join(name);
+            match fs::remove_file(&path) {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(DropletError::io_at("remove", &path, error)),
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     /// The installed file of `entry`, if it is installed. The extension depends on the format

@@ -69,7 +69,9 @@ class Droplet(context: Context) {
             configs.save(recommended())
             settings.update { it.copy(customized = false) }
         } else {
-            configs.save(ConfigRepository.name(ConfigRepository.synchronize(stored, library.fonts.value), settings.values.value.names))
+            // Written only when the library or the names changed it, not at every start.
+            val synchronized = ConfigRepository.name(ConfigRepository.synchronize(stored, library.fonts.value), settings.values.value.names)
+            if (synchronized != stored) configs.save(synchronized)
         }
         initialized = true
     }
@@ -161,19 +163,25 @@ class Droplet(context: Context) {
     suspend fun families(privilege: Privilege): EngineResult<List<FamilyInfo>> = engine.families(privilege)
 
     /**
-     * Applies the current configuration. With `boot`, the engine refuses if its guard tripped.
-     * Then the boot hook is installed (with a fresh copy of the engine) or removed, as the
-     * settings say; a failure of that does not undo the application, and is reported with it.
+     * Applies the current configuration. With `boot`, the configuration applied last is applied
+     * again instead, as the boot hook does: changes the user has not applied yet stay unapplied
+     * (an earlier version that kept no copy applies the current one); and the engine refuses if
+     * its guard tripped. Then the boot hook is installed (with a fresh copy of the engine) or
+     * removed, as the settings say; a failure of that does not undo the application, and is
+     * reported with it.
      */
     suspend fun apply(boot: Boolean): Applied = operations.withLock {
         initialize()
-        val config = configs.config.value ?: throw EngineException("config", "there is no configuration", emptyList())
+        val stored = configs.config.value ?: throw EngineException("config", "there is no configuration", emptyList())
+        val config = if (boot) engine.appliedConfig() ?: stored else stored
+        // The sources of the bundled fonts move with every update of the application.
         val applied = ConfigRepository.synchronize(config, library.fonts.value)
         val privilege = privilege()
         val result = engine.apply(privilege, applied, boot)
         // The digest of the configuration as stored, which the screens compare with: the one
-        // applied differs only in the sources of the fonts and in fonts the library lost.
-        settings.update { it.copy(applied = true, appliedDigest = config.digest()) }
+        // applied differs only in the sources of the fonts and in fonts the library lost. A boot
+        // applies what was applied before, which changes nothing the screens compare.
+        if (!boot) settings.update { it.copy(applied = true, appliedDigest = config.digest()) }
         val hook = try {
             synchronizeHook(privilege)
         } catch (error: CancellationException) {

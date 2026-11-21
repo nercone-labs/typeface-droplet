@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FF57ADD9</color>
+    <!-- The background of the TypeFace Droplet icon (website/public/static/assets/images/projects/labs/typeface-droplet/icon.svg of nercone-dev). -->
+    <color name="ic_launcher_background">#FF3399FF</color>
 </resources>

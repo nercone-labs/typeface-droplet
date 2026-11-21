@@ -18,7 +18,7 @@ import org.junit.Test
 
 /**
  * The selection is what the user decides in the fonts screen: one font per category and style.
- * The categories are the roles of the recommended configuration (`droplet preset`): sans, serif and mono.
+ * The categories are the roles of the recommended configuration (`typeface-droplet preset`): sans, serif and mono.
  */
 class SelectionTest {
     fun font(id: String, italic: Boolean, origin: LibraryFont.Origin = LibraryFont.Origin.IMPORTED, name: String = "$id.ttf") = LibraryFont(

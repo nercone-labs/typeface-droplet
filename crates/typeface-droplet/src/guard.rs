@@ -72,7 +72,8 @@ impl Guard {
     /// or the copy of the store that the boot hook runs). Its command line names both, so a
     /// reused process ID is never mistaken for a guard.
     pub fn is_guard(pid: u32, store: &FontStore) -> bool {
-        Daemon::arguments(pid).is_some_and(|arguments| Guard::is_guard_command(&arguments, &store.root.to_string_lossy()))
+        ProcessInfo::arguments(pid)
+            .is_some_and(|arguments| arguments.get(1..).is_some_and(|arguments| Guard::is_guard_command(arguments, &store.root.to_string_lossy())))
     }
 
     /// Whether `arguments` (without the program) are those of a guard of the store at `root`.
@@ -112,7 +113,10 @@ impl Guard {
     /// can start one (it preloads the fonts), or when the boot does not get that far in time.
     pub fn wait_for_first_server() -> Result<ProcessInfo, Ending> {
         let started = Instant::now();
-        let mut zygotes: Vec<u32> = Vec::new();
+        // The processes seen of each zygote. A device with a 64-bit and a 32-bit zygote starts
+        // both, and restarts both when either crashes, so a crash is a new process of each name:
+        // the starts are counted by name, not added up.
+        let mut zygotes: Vec<(&str, Vec<u32>)> = Guard::ZYGOTES.iter().map(|name| (*name, Vec::new())).collect();
         loop {
             if let Some(server) = Guard::system_server() {
                 return Ok(server);
@@ -124,15 +128,16 @@ impl Guard {
                     Ending::Interrupted(reason)
                 });
             }
-            for name in Guard::ZYGOTES {
+            for (name, seen) in &mut zygotes {
                 for process in ProcessTable::named(name).unwrap_or_default() {
-                    if !zygotes.contains(&process.pid) {
-                        zygotes.push(process.pid);
+                    if !seen.contains(&process.pid) {
+                        seen.push(process.pid);
                     }
                 }
             }
-            if zygotes.len() > Guard::MAX_ZYGOTE_STARTS {
-                return Err(Ending::Failed(format!("zygote crashed {} times while starting", zygotes.len() - 1)));
+            let starts = zygotes.iter().map(|(_, seen)| seen.len()).max().unwrap_or(0);
+            if starts > Guard::MAX_ZYGOTE_STARTS {
+                return Err(Ending::Failed(format!("zygote crashed {} times while starting", starts - 1)));
             }
             if started.elapsed() > Guard::BOOT_TIMEOUT {
                 return Err(Ending::Failed("system_server did not start".to_string()));
@@ -235,24 +240,35 @@ impl Guard {
 
     /// Saves how the watch ended, unless this guard has been replaced. A failure removes the
     /// generated documents first, without waiting for the lock, so that a restarted
-    /// system_server does not find them; while system_server still runs, the font service
-    /// reloads the original documents.
+    /// system_server does not find them; the failure is recorded next, before anything that may
+    /// take long, so that an application that waits for the lock sees it; then, while
+    /// system_server still runs, the font service reloads the original documents.
     pub fn finish(store: &FontStore, ending: Ending, log: &mut Log) -> Result<GuardState, DropletError> {
         let current = State::load(&store.state_path(), log)?;
         if !Guard::owns(&current) {
             log.info("guard: replaced by a later operation; the watch ends without a verdict");
             return Ok(current.guard);
         }
+        let failed = matches!(ending, Ending::Failed(_));
         if let Ending::Failed(reason) = &ending {
             log.error(format!("guard: {reason}; removing the generated documents"));
             let removed = crate::Engine::detach_documents(log);
             log.info(format!("guard: removed {removed} generated documents"));
-            if Guard::system_server().is_some()
-                && let Err(error) = FontService::restart()
-            {
-                log.error(format!("guard: the font service failed to reload the original documents: {error}"));
-            }
         }
+        // The reload runs even when the verdict cannot be recorded: the documents are detached
+        // already, and system_server must not keep serving the ones that failed.
+        let verdict = Guard::record(store, ending, log);
+        if failed
+            && Guard::system_server().is_some()
+            && let Err(error) = FontService::restart()
+        {
+            log.error(format!("guard: the font service failed to reload the original documents: {error}"));
+        }
+        verdict
+    }
+
+    /// Records how the watch ended, under the lock of the store, unless this guard has been replaced.
+    pub fn record(store: &FontStore, ending: Ending, log: &mut Log) -> Result<GuardState, DropletError> {
         let _lock = store.lock()?;
         let mut state = State::load(&store.state_path(), log)?;
         if !Guard::owns(&state) {

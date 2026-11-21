@@ -4,6 +4,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FontDownload
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.RestartAlt
@@ -16,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import dev.nercone.typefacedroplet.R
@@ -23,8 +27,6 @@ import dev.nercone.typefacedroplet.config.Settings
 import dev.nercone.typefacedroplet.engine.BootHook
 import dev.nercone.typefacedroplet.engine.Config
 import dev.nercone.typefacedroplet.engine.Engine
-import dev.nercone.typefacedroplet.privilege.Privilege
-import dev.nercone.typefacedroplet.privilege.PrivilegeChoice
 import dev.nercone.typefacedroplet.ui.Notices.notices
 
 /**
@@ -35,13 +37,16 @@ import dev.nercone.typefacedroplet.ui.Notices.notices
 object SettingsScreen {
     /** A page of the settings. */
     enum class Page(val title: Int) {
-        PRIVILEGE(R.string.settings_privilege),
-        BOOT(R.string.settings_boot),
         APPLYING(R.string.settings_applying),
         COMPONENTS(R.string.settings_components),
+        BOOT(R.string.settings_boot),
         ADVANCED(R.string.settings_advanced),
+        PRIVILEGE(R.string.settings_privilege),
         ABOUT(R.string.settings_about),
     }
+
+    /** Where the source of the application is published. */
+    const val SOURCE = "https://github.com/nercone-labs/typeface-droplet"
 
     /** The restart targets with a switch of their own. */
     val TARGETS = listOf("com.android.systemui" to R.string.restart_systemui, Config.HOME to R.string.restart_home, Config.BACKGROUND to R.string.restart_background)
@@ -58,7 +63,9 @@ object SettingsScreen {
             notices(data, model)
             when (page) {
                 null -> item(key = "pages") { Pages(data, onOpen) }
-                Page.PRIVILEGE -> item(key = "privilege") { Privilege(data, model) }
+                Page.PRIVILEGE -> item(key = "privilege") {
+                    Privileges.Choices(data.state.privilege, data.settings.privilege, enabled = data.state.operation == null, onSelect = model::setPrivilegeChoice)
+                }
                 Page.BOOT -> item(key = "boot") { Boot(data, model) }
                 Page.APPLYING -> item(key = "applying") { Configured(data) { config -> Applying(config, model) } }
                 Page.COMPONENTS -> item(key = "components") { Configured(data) { config -> Components(config, model) } }
@@ -81,11 +88,11 @@ object SettingsScreen {
         val settings = data.settings
         val config = data.config
         val pages = listOf(
-            Triple(Page.PRIVILEGE, Icons.Default.Security, Labels.privilegeChoice(settings.privilege) + (data.state.privilege?.privilege?.let { " · " + Labels.privilege(it.kind) } ?: "")),
-            Triple(Page.BOOT, Icons.Default.PowerSettingsNew, bootSummary(data.state.status?.hook, settings)),
             Triple(Page.APPLYING, Icons.Default.RestartAlt, config?.let { applyingSummary(it) } ?: stringResource(R.string.loading)),
             Triple(Page.COMPONENTS, Icons.Default.Block, config?.let { pluralStringResource(R.plurals.components_count, it.components.size, it.components.size) } ?: stringResource(R.string.loading)),
+            Triple(Page.BOOT, Icons.Default.PowerSettingsNew, bootSummary(data.state.status?.hook, settings)),
             Triple(Page.ADVANCED, Icons.Default.Tune, stringResource(if (settings.customized) R.string.customized_short else R.string.recommended_short)),
+            Triple(Page.PRIVILEGE, Icons.Default.Security, Privileges.summary(settings.privilege, data.state.privilege)),
             Triple(Page.ABOUT, Icons.Default.Info, stringResource(R.string.settings_version, version())),
         )
         Widgets.Group {
@@ -115,28 +122,6 @@ object SettingsScreen {
     fun version(): String {
         val context = LocalContext.current
         return remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty() }
-    }
-
-    @Composable
-    fun Privilege(data: ScreenData, model: AppViewModel) {
-        val state = data.state
-        Widgets.Section(null, stringResource(R.string.settings_privilege_help)) {
-            PrivilegeChoice.entries.forEachIndexed { index, choice ->
-                Widgets.RadioItem(
-                    index, PrivilegeChoice.entries.size,
-                    headline = Labels.privilegeChoice(choice),
-                    supporting = state.privilege?.statuses?.let { statuses ->
-                        when (choice) {
-                            PrivilegeChoice.AUTOMATIC -> state.privilege.privilege?.let { stringResource(R.string.privilege_runs_as_root, Labels.privilege(it.kind)) }
-                            else -> statuses.firstOrNull { (kind, _) -> (kind == Privilege.Kind.ROOT) == (choice == PrivilegeChoice.ROOT) }
-                                ?.let { (_, status) -> Labels.describe(status) }
-                        }
-                    },
-                    selected = data.settings.privilege == choice,
-                    enabled = state.operation == null,
-                ) { model.setPrivilegeChoice(choice) }
-            }
-        }
     }
 
     @Composable
@@ -242,11 +227,13 @@ object SettingsScreen {
 
     @Composable
     fun About() {
+        val uri = LocalUriHandler.current
         Column(verticalArrangement = Arrangement.spacedBy(Widgets.SPACING)) {
+            Widgets.Identity(stringResource(R.string.settings_version, version()))
             Widgets.Section(null, stringResource(R.string.settings_uninstall)) {
-                Widgets.Item(0, 3, stringResource(R.string.app_name), stringResource(R.string.settings_version, version()))
-                Widgets.Item(1, 3, stringResource(R.string.settings_store_title), stringResource(R.string.settings_store, Engine.STORE))
-                Widgets.Item(2, 3, stringResource(R.string.settings_license_title), stringResource(R.string.settings_fonts_license))
+                Widgets.Item(0, 3, stringResource(R.string.settings_store_title), stringResource(R.string.settings_store, Engine.STORE), Icons.Default.Folder)
+                Widgets.Item(1, 3, stringResource(R.string.settings_license_title), stringResource(R.string.settings_fonts_license), Icons.Default.FontDownload)
+                Widgets.Item(2, 3, stringResource(R.string.settings_source_title), SOURCE, Icons.Default.Code, onClick = { Widgets.open(uri, SOURCE) })
             }
         }
     }

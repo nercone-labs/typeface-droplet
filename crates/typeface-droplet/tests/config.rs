@@ -4,8 +4,8 @@ use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
 
-use droplet::{Action, Config, Face, FontEntry, FontInfo, FontSource, FontStore, Log, Matcher, Pattern, Preset, Role, Rule, SourceReader};
 use sfnt::{FontFile, NameTable, Tag};
+use typeface_droplet::{Action, Config, Face, FontEntry, FontInfo, FontSource, FontStore, Log, Matcher, Pattern, Preset, Role, Rule, SourceReader};
 
 #[test]
 fn patterns_match_like_shell_wildcards() {

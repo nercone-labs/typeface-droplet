@@ -1,35 +1,24 @@
 package dev.nercone.typefacedroplet.ui
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.nercone.typefacedroplet.R
-import dev.nercone.typefacedroplet.engine.LogLevel
-import dev.nercone.typefacedroplet.engine.LogLine
 import dev.nercone.typefacedroplet.engine.ReloadOutcome
-import java.text.DateFormat
-import java.util.Date
 
 /**
  * What every screen tells at its top, the same way on each: the outcome of the last operation,
  * and that the configuration changed since it was applied. A restricted root is told by a dialog
- * of the frame instead (`DropletApp.Restricted`).
+ * of the frame instead (`Frame.Restricted`).
  */
 object Notices {
     /**
@@ -92,31 +81,5 @@ object Notices {
         )
         is Outcome.ConfigSetAside -> Triple(Widgets.Tone.WARNING, stringResource(R.string.outcome_config_set_aside), stringResource(R.string.outcome_config_set_aside_text, outcome.name))
         is Outcome.Failed -> Triple(Widgets.Tone.ERROR, stringResource(R.string.outcome_failed), outcome.text)
-    }
-
-    /** The engine log of the last operation, in a sheet. */
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    fun Log(lines: List<LogLine>, onDismiss: () -> Unit) {
-        val format = DateFormat.getTimeInstance(DateFormat.MEDIUM)
-        ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-            Text(stringResource(R.string.log), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
-            if (lines.isEmpty()) Text(stringResource(R.string.log_empty), modifier = Modifier.padding(24.dp))
-            LazyColumn(contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 32.dp)) {
-                items(lines) { line ->
-                    Text(
-                        "${format.format(Date(line.time * 1000))}  ${line.message}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = when (line.level) {
-                            LogLevel.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
-                            LogLevel.WARNING -> MaterialTheme.colorScheme.tertiary
-                            LogLevel.ERROR -> MaterialTheme.colorScheme.error
-                        },
-                        modifier = Modifier.padding(vertical = 2.dp),
-                    )
-                }
-            }
-        }
     }
 }

@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use droplet::{BootHook, Config, Engine, FontStore, Preset, RootManager};
+use typeface_droplet::{BootHook, Config, Engine, FontStore, Preset, RootManager};
 
 fn temporary(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("droplet-boot-{name}-{}", std::process::id()));
@@ -23,7 +23,7 @@ fn hook_scripts_run_the_store_copy_of_the_engine_with_quoted_arguments() {
     // POSIX shell quoting: a single quote is written as '\'' inside single quotes.
     assert_eq!(
         *lines.last().unwrap(),
-        "'/data/adb/it'\\''s here/bin/droplet' boot --package 'dev.nercone.typefacedroplet' --store '/data/adb/it'\\''s here' >/dev/null 2>&1"
+        "'/data/adb/it'\\''s here/bin/typeface-droplet' boot --package 'dev.nercone.typefacedroplet' --store '/data/adb/it'\\''s here' >/dev/null 2>&1"
     );
     assert!(script.ends_with('\n'));
 }
@@ -106,7 +106,7 @@ fn restart_targets_are_packages_home_or_background() {
 
 #[test]
 fn reports_name_root_managers_and_reload_outcomes_in_camel_case() {
-    use droplet::ReloadOutcome;
+    use typeface_droplet::ReloadOutcome;
     let names: Vec<String> = RootManager::ALL.iter().map(|manager| serde_json::to_string(manager).unwrap()).collect();
     assert_eq!(names, ["\"magisk\"", "\"kernelSU\"", "\"aPatch\""]);
     let outcomes: Vec<String> = [ReloadOutcome::Served, ReloadOutcome::Ignored, ReloadOutcome::Unchanged, ReloadOutcome::AtStart]
@@ -123,7 +123,7 @@ fn reports_name_root_managers_and_reload_outcomes_in_camel_case() {
 
 #[test]
 fn only_rescue_party_reboots_count_as_failures() {
-    use droplet::Watch;
+    use typeface_droplet::Watch;
     for reason in ["reboot,RescueParty", "reboot,rescueparty", "shutdown,rescue"] {
         assert!(Watch::is_rescue(reason), "{reason}");
     }
@@ -134,7 +134,7 @@ fn only_rescue_party_reboots_count_as_failures() {
 
 #[test]
 fn guards_are_recognized_by_their_command_and_store_whichever_engine_runs_them() {
-    use droplet::Guard;
+    use typeface_droplet::Guard;
     let arguments = |text: &str| text.split(' ').map(str::to_string).collect::<Vec<_>>();
     let root = "/data/adb/typeface-droplet";
     assert!(Guard::is_guard_command(&arguments("guard --store /data/adb/typeface-droplet --seconds 60 --boot"), root));
@@ -143,4 +143,20 @@ fn guards_are_recognized_by_their_command_and_store_whichever_engine_runs_them()
     assert!(!Guard::is_guard_command(&arguments("boot --store /data/adb/typeface-droplet"), root), "another command of the engine");
     assert!(!Guard::is_guard_command(&arguments("--store /data/adb/typeface-droplet guard"), root));
     assert!(!Guard::is_guard_command(&[], root));
+}
+
+#[test]
+fn copies_of_the_engine_under_earlier_names_are_removed_and_the_current_one_kept() {
+    let directory = temporary("legacy");
+    let store = FontStore::new(directory.join("store"), None);
+    let bin = store.executable_path().parent().unwrap().to_path_buf();
+    fs::create_dir_all(&bin).unwrap();
+    assert_eq!(store.executable_path(), bin.join("typeface-droplet"), "the copy is named after the engine");
+    fs::write(bin.join("droplet"), "old").unwrap();
+    fs::write(store.executable_path(), "new").unwrap();
+    store.remove_legacy_executables().unwrap();
+    assert!(!bin.join("droplet").exists());
+    assert!(store.executable_path().is_file());
+    // Nothing to remove is not an error.
+    store.remove_legacy_executables().unwrap();
 }

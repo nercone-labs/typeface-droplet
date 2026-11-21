@@ -1,10 +1,12 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use droplet::{ApplyMode, Config, DropletError, Engine, FontInfo, FontSource, FontStore, Guard, GuardTarget, LogLine, Preset, SourceReader};
+use android::ControlGroup;
+
 use serde::Serialize;
 use serde_json::{Value, json};
+use typeface_droplet::{ApplyMode, Config, DropletError, Engine, FontInfo, FontSource, FontStore, Guard, GuardTarget, LogLine, Preset, SourceReader};
 
 /// A subcommand of the command line.
 enum Command {
@@ -25,7 +27,7 @@ enum Command {
     Version,
 }
 
-/// The parsed command line: `droplet <command> [arguments] [--store DIR]`.
+/// The parsed command line: `typeface-droplet <command> [arguments] [--store DIR]`.
 ///
 /// Every command prints one JSON object to standard output:
 /// `{"ok": true, "result": ..., "log": [...]}` or
@@ -38,16 +40,16 @@ struct CommandLine {
 }
 
 impl CommandLine {
-    const USAGE: &'static str = "usage: droplet <inspect|hash> <file> [--offset N] [--length N]
-       droplet preset <preset.json>
-       droplet validate <config.json>
-       droplet apply <config.json> [--boot]
-       droplet boot --package PACKAGE
-       droplet hook install --package PACKAGE | droplet hook remove
-       droplet cleanup --package PACKAGE
-       droplet families | revert | status | version
-       droplet soft-restart [--seconds N]
-       droplet guard --seconds N (--pid PID | --after PID | --boot)
+    const USAGE: &'static str = "usage: typeface-droplet <inspect|hash> <file> [--offset N] [--length N]
+       typeface-droplet preset <preset.json>
+       typeface-droplet validate <config.json>
+       typeface-droplet apply <config.json> [--boot]
+       typeface-droplet boot --package PACKAGE
+       typeface-droplet hook install --package PACKAGE | typeface-droplet hook remove
+       typeface-droplet cleanup --package PACKAGE
+       typeface-droplet families | revert | status | version
+       typeface-droplet soft-restart [--seconds N]
+       typeface-droplet guard --seconds N (--pid PID | --after PID | --boot)
 options: --store DIR   the store directory, an absolute path (default /data/adb/typeface-droplet)";
 
     fn parse() -> Result<CommandLine, lexopt::Error> {
@@ -187,12 +189,20 @@ fn main() -> ExitCode {
     let command_line = match CommandLine::parse() {
         Ok(command_line) => command_line,
         Err(error) => {
-            eprintln!("droplet: {error}\n{}", CommandLine::USAGE);
+            eprintln!("typeface-droplet: {error}\n{}", CommandLine::USAGE);
             let output = json!({ "ok": false, "error": { "kind": "usage", "message": error.to_string() }, "log": [] });
             println!("{output}");
             return ExitCode::from(2);
         }
     };
+    // An engine the application started through an `su` that raises the calling process itself
+    // (KernelSU, APatch) is in the group of the application process, which the system freezes
+    // while the application is cached and ends whole with it. It leaves that group before
+    // anything else, and the processes it starts are outside it too. Run as the application, it
+    // has nothing to leave the system for, and could not.
+    if Engine::uid() == 0 {
+        ControlGroup::leave_application(Path::new("/"));
+    }
     let (result, log) = command_line.run();
     let (output, status) = match result {
         Ok(result) => (json!({ "ok": true, "result": result, "log": log }), ExitCode::SUCCESS),

@@ -161,7 +161,7 @@ impl Engine {
 
     /// The capabilities the engine uses. Running as uid 0 does not imply them: a root manager
     /// can drop them (the "Restrict" policy of Magisk drops every one).
-    pub const CAPABILITIES: [Capability; 5] = [
+    pub const CAPABILITIES: [Capability; 6] = [
         // Copies in skeletons keep the owners of the originals.
         Capability::CHOWN,
         // Configurations and fonts are read from the private directory of the application.
@@ -172,6 +172,8 @@ impl Engine {
         Capability::SYS_PTRACE,
         // Mounts and mount namespaces.
         Capability::SYS_ADMIN,
+        // Entering the mount namespace of init: `setns` asks for it besides SYS_ADMIN.
+        Capability::SYS_CHROOT,
     ];
 
     /// Requires running as root (uid 0) with every capability in `Engine::CAPABILITIES`.
@@ -313,6 +315,9 @@ impl Engine {
             state.save(&self.store.state_path())?;
             return Err(DropletError::Refused(message));
         }
+        // A configuration still watched may yet break the system; without its guard, it must
+        // not stay mounted if this application fails before it replaces it.
+        let watched = matches!(state.guard, GuardState::Watching { .. });
         Guard::stop(&state, &self.store);
         state.guard = GuardState::Idle;
         // Saved at once: if a later step fails, the stopped guard must not stay recorded as
@@ -320,14 +325,17 @@ impl Engine {
         state.save(&self.store.state_path())?;
         self.log.info(format!("applying a configuration with {} roles and {} rules ({mode:?})", config.roles.len(), config.rules.len()));
 
-        Engine::enter_init_namespace()?;
-        let originals = self.originals()?;
-        let families = OriginalFamilies::default();
-        let plan = self.plan(config, &originals, &families)?;
-        let installed = self.install_fonts(config, &plan.requested, fresh_boot)?;
         let generation = state.generation + 1;
-        let generated = self.generate(config, &originals, &installed, &families, &plan.primary, generation)?;
-        self.add_fonts(&generated, &installed, &mut state)?;
+        let (generated, installed) = match self.prepare(config, generation, fresh_boot, &mut state) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                if watched && state.applied {
+                    self.log.error(format!("applying failed: {error}; the configuration applied before lost its guard, restoring the original documents"));
+                    self.roll_back(&mut state);
+                }
+                return Err(error);
+            }
+        };
         let server = Guard::system_server().map(|server| server.pid);
         if let Err(error) = self.mount(&generated, generation, config, &mut state) {
             // Some documents may be mounted already, with no guard to undo them.
@@ -361,6 +369,26 @@ impl Engine {
             restarted,
             guard,
         })
+    }
+
+    /// Prepares the application of `config` as generation `generation`: installs its fonts,
+    /// generates its documents and adds its fonts to the system font directories, without
+    /// replacing any document of the system yet.
+    pub fn prepare(
+        &mut self,
+        config: &Config,
+        generation: u64,
+        fresh_boot: bool,
+        state: &mut State,
+    ) -> Result<(Vec<GeneratedDocument>, HashMap<FontKey, InstalledFont>), DropletError> {
+        Engine::enter_init_namespace()?;
+        let originals = self.originals()?;
+        let families = OriginalFamilies::default();
+        let plan = self.plan(config, &originals, &families)?;
+        let installed = self.install_fonts(config, &plan.requested, fresh_boot)?;
+        let generated = self.generate(config, &originals, &installed, &families, &plan.primary, generation)?;
+        self.add_fonts(&generated, &installed, state)?;
+        Ok((generated, installed))
     }
 
     /// Finds the copies of fonts the documents need, without installing anything: the
@@ -646,7 +674,7 @@ impl Engine {
             return Err(DropletError::Refused("some components could not be restored; the store is kept".to_string()));
         }
         Engine::detach_documents(&mut self.log);
-        BootHook::remove()?;
+        BootHook::remove(&self.store)?;
         fs::remove_dir_all(&self.store.root).map_err(|error| DropletError::io_at("remove", &self.store.root, error))?;
         Ok(true)
     }
@@ -792,7 +820,7 @@ impl Engine {
 
     pub fn remove_hook(&mut self) -> Result<BootHook, DropletError> {
         Engine::require_root()?;
-        let hook = BootHook::remove()?;
+        let hook = BootHook::remove(&self.store)?;
         self.log.info("removed the boot hook");
         Ok(hook)
     }

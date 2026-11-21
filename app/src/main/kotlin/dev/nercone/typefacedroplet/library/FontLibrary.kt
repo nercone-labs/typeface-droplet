@@ -3,6 +3,7 @@ package dev.nercone.typefacedroplet.library
 import android.content.Context
 import android.graphics.Typeface
 import android.net.Uri
+import dev.nercone.typefacedroplet.config.DurableFile
 import dev.nercone.typefacedroplet.engine.Engine
 import dev.nercone.typefacedroplet.engine.EngineJson
 import dev.nercone.typefacedroplet.engine.FaceInfo
@@ -161,11 +162,7 @@ class FontLibrary(val context: Context, val engine: Engine) {
     suspend fun publish(list: List<LibraryFont>) {
         val sorted = list.sortedWith(ORDER)
         state.value = sorted
-        withContext(Dispatchers.IO) {
-            val temporary = File(context.filesDir, "$INDEX.tmp")
-            temporary.writeText(EngineJson.json.encodeToString(serializer, sorted))
-            if (!temporary.renameTo(index)) throw IOException("cannot save $index")
-        }
+        withContext(Dispatchers.IO) { DurableFile.write(index, EngineJson.json.encodeToString(serializer, sorted)) }
     }
 
     /**

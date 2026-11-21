@@ -54,6 +54,14 @@ sibling application built the same way, so that both behave alike.
   each line.
 - **Importing a font tells its outcome**, including that the library had the font already (the
   library recognises a font by the SHA-256 of its bytes, so the same file is never added twice).
+- **Both applications share their frame and their status card** (`Frame`, `Widgets.Hero`): the
+  frame was written twice, line for line, and the cards of the home screens differed only in
+  their emblem. The emblem is the rounded hexagon of the application icon, coloured by the state
+  (primary when it is as wanted, the error colour when it needs the user, a neutral outline
+  while it is unknown); it turns when the state becomes good, and back when it no longer is.
+- **The settings list the pages of the application first**, and those every application of the
+  kind has last: Privilege, then About. About shows the icon and the version of the application,
+  where its engine keeps its files, and a link to its source.
 - **The notification permission is asked for once**, after the first application
   (`Settings.notificationsAsked`), instead of after every application while it is not granted.
 
@@ -108,6 +116,16 @@ sibling application built the same way, so that both behave alike.
   the boot worker being replaced by the work of a later boot) passes through instead of becoming
   a failure notice or a notification.
 - **A failed import leaves nothing behind**: its temporary copy is deleted whatever happens.
+- **The application after a boot re-applies what was applied** (`Droplet.apply` with `boot`),
+  from the copy it keeps of the configuration the engine applied last (`Engine.appliedConfig`,
+  written only once the engine succeeded), as the boot hook re-applies the engine's saved copy. It used to apply the stored configuration, with the edits the user had
+  not applied yet, which the engine then saved for the boot hook too, and the notice of changes
+  not applied yet went away. Only a version that kept no copy applies the stored one.
+- **The configuration and the library are written durably** (`DurableFile`): the new content is
+  synced before it replaces the old file. A rename alone may leave an empty file on f2fs after a
+  power loss: an empty configuration was moved aside and the recommended one used, and an empty
+  library lost every imported font. The configuration is no longer written again at every start
+  of the application when nothing changed it.
 - **The engine's own messages** say what `su` printed when the engine printed no result, and an
   unexpected result is an engine error with its log rather than a crash of the application.
 
@@ -132,6 +150,39 @@ sibling application built the same way, so that both behave alike.
   (with a warning in the log) instead of failing the command after zygote was already told to
   restart.
 
+- **A configuration still watched is not left without its guard.** `apply` stops the guard of
+  the configuration applied before; when the new one then fails before it is mounted (a font
+  that no longer matches its id, a document that cannot be generated), the earlier one stayed
+  mounted with nothing to undo it if it broke the system. Its documents are now detached
+  (`Engine::roll_back`) when it was still watched.
+- **Every capability the engine uses is required**: `setns` into the mount namespace of init
+  needs `CAP_SYS_CHROOT` besides `CAP_SYS_ADMIN`, and a root manager that grants capabilities one
+  by one (KernelSU's App Profile) gave a bare "Operation not permitted" without it instead of
+  the explanation of a restricted root.
+- **The starts of zygote are counted by name.** A device with a 64-bit and a 32-bit zygote
+  starts both, and restarts both when either crashes; adding their processes up counted two
+  starts before any crash, and tripped the guard after one crash instead of three.
+- **A tripped guard is recorded before the font service reloads.** The reload can take up to the
+  timeout of a command; an application that took the lock in between still saw the guard
+  watching, stopped it and applied the configuration that had just failed again.
+
+- **The engine leaves the cgroup of the application** (`ControlGroup` of `crates/android`). Android
+  keeps a group for every application process (`/apps/uid_<uid>/pid_<pid>` of the unified
+  hierarchy on Android 17), freezes it while the application is cached (seen on the emulator:
+  `cgroup.events` reads `frozen 1` some seconds after the application went to the background)
+  and ends every process in it with the application (`killProcessGroup` of libprocessgroup). The
+  `su` of KernelSU and APatch raises the calling process itself (KernelSU's `execve` hook calls
+  `ksu_escape_to_root` on it), so the engine, and every process it started, stayed in that group;
+  Magisk's `su` has its daemon start the root process, outside it. An engine run as root now
+  moves itself into the root groups first, when it finds itself in the group of an application
+  process, and the processes it starts are outside the group too. The guard and the cleanup daemon
+  inherit it: a guard frozen or ended with the application cannot undo a configuration that
+  breaks the system, which is when the application is ended too.
+  Moving every engine run was preferred to moving only the long-lived processes: a command that
+  holds the lock of the store must not be frozen with the application either. Running the
+  operations of the screens as expedited work or in a foreground service was set aside: it keeps
+  the application running, but neither stops the system from ending it.
+
 ### Known and not changed
 
 These were found in a review and are plausible, but need a device with root to reproduce and a
@@ -147,6 +198,9 @@ larger change to fix safely:
   seconds, with its scripts capped at 35 (Magisk's developer guide, "Boot Scripts"). A first application at boot that must copy large fonts to slow storage may then
   race zygote. Fonts are installed when they are applied by hand, so this only concerns a
   configuration whose fonts were removed from the store.
+- `Droplet` is created in `Application.onCreate` and reads the shared preferences there, on the
+  main thread, once per process. It is small, and moving it changes when the settings first
+  exist for the boot receiver.
 - If the engine dies between creating a placeholder in the skeleton and binding the font onto it,
   the empty placeholder counts as installed until the next boot.
 
@@ -163,20 +217,34 @@ same code. The parts are:
   manager, the activity manager, processes, capabilities and properties. Each engine uses only
   some of them; the unused ones are left out of the binary by the linker, and one crate
   for both is simpler to keep equal than two crates that differ by a few modules.
-- **`crates/droplet/src/log.rs`**, byte for byte.
+- **`crates/typeface-droplet/src/log.rs`**, byte for byte.
 - **The `privilege` package** of the application (`Privilege`, `PrivilegeSelector`,
   `RootPrivilege`, `ShizukuPrivilege`, `CommandService`, `ProcessRunner` and
   `ICommandService.aidl`), which differs only in its `package` line.
-- **`ui/Widgets.kt`**, which differs only in its `package` line and its import of `R`. Parts that
-  belong to one application stay out of it (the editor of variation axes is
-  `CustomizeScreen.Axes` in TypeFace Droplet).
-- The shared labels at the top of `ui/Labels` (`privilege`, `privilegeChoice`, `describe`,
-  `rootManager`, `rootManagers`), and the shape of the frame (`Navigator`, `Route`) and of the
-  notice of changes not applied yet (`Notices.Pending`).
+- **`engine/EngineProtocol.kt`**: how the application reads what its engine prints (the
+  response, its log, `EngineException`, `EngineResult`). The two copies of `Engine.decode` and
+  `Engine.result` had drifted (one told the output of `su` when the engine printed nothing, the
+  other did not). The JSON settings stay each application's (`EngineJson`), because Replay
+  Integrity coerces unknown values to their defaults and TypeFace Droplet must not: it would
+  rewrite a configuration of a newer version with values it does not know replaced.
+- **`ui/Widgets.kt`**, the parts every screen is made of, including the status card of the home
+  screen (`Hero`, with the hexagon of the application icon as its emblem), its buttons
+  (`Actions`) and the name of the application with its icon (`Identity`). Parts that belong to
+  one application stay out of it (the editor of variation axes is `CustomizeScreen.Axes` in
+  TypeFace Droplet).
+- **`ui/Frame.kt`**, the frame: the top bar, the navigation (a bar, or a rail in a wide window)
+  and the screen of the route, generic over the destinations of each application
+  (`Frame.Destination`), with the dialog of a restricted root and the sheet of the engine log.
+- **`ui/Privileges.kt`**, what the screens show of the privilege: its words, the guide to get one
+  (`Setup`) and the page of the settings that chooses it (`Choices`).
+- The shared labels at the top of `ui/Labels` (`rootManager`, `rootManagers`), the shape of the
+  application (`Navigator`, `Route`, `ScreenData` with its `pending`) and of the notice of
+  changes not applied yet (`Notices.Pending`).
 - The build files outside the application's own steps: `build.gradle.kts`, `gradle.properties`,
   `gradle/libs.versions.toml`, `rustfmt.toml`, and `app/proguard-rules.pro` apart from its package names.
 
-A change to one of these parts is made in both repositories, in the same words. The copies are
+Each shared Kotlin file differs only in its `package` line and the package names of its
+imports. A change to one of these parts is made in both repositories, in the same words. The copies are
 checked with `diff -r crates/android ../replay-integrity/crates/android`, and with `diff` after
 replacing the package names for the Kotlin files.
 
@@ -185,3 +253,37 @@ dependency and a published Gradle library. It was set aside for now. Each reposi
 its own today, from one checkout, with every Gradle dependency verified
 (`gradle/verification-metadata.xml`); a submodule makes every checkout and the CI depend on a
 second repository, and a published library must be published and verified on every change.
+
+## Names of the engine
+
+The core crate of each engine had a short name (`droplet`), the name of its executable, of the
+library the application packages (`libdroplet.so`) and of the copy the boot hook runs. Every crate now
+bears the full name of its application, `typeface-droplet` (the library `typeface_droplet`), and so do the
+executable, `libtypeface-droplet.so` (a hyphen is allowed in the name of a native library:
+`isFilenameSafe` of `frameworks/base/libs/androidfw/ApkParsing.cpp` accepts it) and the copy in
+the store. The names of the data in the store (its log, state and configuration) are kept, so an
+update loses nothing.
+
+The copy of the engine under its earlier name keeps running until the boot hook is installed
+again by the updated application: the scripts of the earlier version name it. Installing the hook
+writes the scripts that name the new copy first, and only then removes the earlier copy
+(`LEGACY_EXECUTABLES`), so no script ever names a missing file.
+
+The Gradle property that limits the ABIs of a local build is `engine.abis` in both applications,
+so that the build files differ only in the names of the application.
+
+## Dependencies
+
+Every dependency is verified (`gradle/verification-metadata.xml`, SHA-256). The file is generated
+by Gradle (`--write-verification-metadata sha256` with the tasks of the CI and of a local build:
+`:app:testDebugUnitTest :app:assembleRelease :app:assembleDebug :app:lintDebug`), after its
+components were emptied, so that versions no longer used leave it, and with an empty Gradle home
+(`-g <empty directory>`): Gradle records only what it downloads, and the BOMs and parent POMs that
+an earlier build left in the cache were missing, which failed the CI, whose cache is empty. Gradle records the artifacts of
+the machine it runs on only: `aapt2` comes in one jar per system, and the jar for Linux, where the
+CI builds, is added by hand from Google's Maven repository. Both applications share the file.
+
+Material 3 is 1.5.0, its first stable release with the Expressive components, which needs Compose
+1.12 and so stays with the Compose BOM 2026.09.00. The next BOM (2026.11.01, Compose 1.13)
+requires `compileSdk` 37.1, a platform the build machines do not have yet; it was left for a
+change of its own.

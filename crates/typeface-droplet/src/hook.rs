@@ -120,17 +120,21 @@ impl BootHook {
                 .map_err(|error| DropletError::io_at("set the mode of", &temporary, error))?;
             fs::rename(&temporary, &path).map_err(|error| DropletError::io_at("rename", &temporary, error))?;
         }
+        // Every script now runs the copy of this version; the copies of earlier versions are no longer run.
+        store.remove_legacy_executables()?;
         Ok(BootHook::current())
     }
 
-    /// Removes every script of this engine.
-    pub fn remove() -> Result<BootHook, DropletError> {
+    /// Removes every script of this engine, and the copies of the engine that earlier versions
+    /// installed under other names, which no script runs any more.
+    pub fn remove(store: &FontStore) -> Result<BootHook, DropletError> {
         for path in BootHook::candidates() {
             match fs::remove_file(&path) {
                 Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(DropletError::io_at("remove", &path, error)),
                 _ => {}
             }
         }
+        store.remove_legacy_executables()?;
         Ok(BootHook::current())
     }
 }

@@ -20,8 +20,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-// The data exchanged with the engine. Every type mirrors a type of the `droplet` crate and
-// its JSON form exactly; see crates/droplet/src/config.rs and engine.rs.
+// The data exchanged with the engine. Every type mirrors a type of the `typeface-droplet` crate and
+// its JSON form exactly; see crates/typeface-droplet/src/config.rs and engine.rs.
 
 @Serializable
 data class FontSource(val path: String, val offset: Long = 0, val length: Long? = null)
@@ -215,7 +215,7 @@ data class Config(
     }
 }
 
-/** The fonts of the standard roles, for the recommended configuration (`droplet preset`). */
+/** The fonts of the standard roles, for the recommended configuration (`typeface-droplet preset`). */
 @Serializable
 data class Preset(
     val sans: FontEntry? = null,
@@ -385,23 +385,6 @@ data class ValidationReport(val problems: List<String>)
 
 @Serializable
 data class VersionReport(val version: String, val configVersion: Int)
-
-@Serializable
-enum class LogLevel {
-    @SerialName("info") INFO,
-    @SerialName("warning") WARNING,
-    @SerialName("error") ERROR,
-}
-
-@Serializable
-data class LogLine(val time: Long, val level: LogLevel, val message: String)
-
-@Serializable
-data class EngineError(val kind: String, val message: String)
-
-/** The envelope of every engine response. */
-@Serializable
-data class EngineResponse(val ok: Boolean, val result: JsonElement? = null, val error: EngineError? = null, val log: List<LogLine> = emptyList())
 
 /** The JSON settings shared by every exchange with the engine. */
 object EngineJson {
