@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/sfnt", "crates/fontxml", "crates/mount", "crates/android", "crates/typeface-droplet"]
 
 [workspace.package]
-version = "1.2.0"
+version = "2.0.0"
 edition = "2024"
 authors = ["Nercone <nercone@nercone.dev>"]
 repository = "https://github.com/nercone-labs/typeface-droplet"
