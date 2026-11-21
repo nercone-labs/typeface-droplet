@@ -329,16 +329,18 @@ impl Engine {
         let generated = self.generate(config, &originals, &installed, &families, &plan.primary, generation)?;
         self.add_fonts(&generated, &installed, &mut state)?;
         let server = Guard::system_server().map(|server| server.pid);
-        self.mount(&generated, generation, config, &mut state)?;
+        if let Err(error) = self.mount(&generated, generation, config, &mut state) {
+            // Some documents may be mounted already, with no guard to undo them.
+            self.log.error(format!("mounting failed: {error}; restoring the original documents"));
+            self.roll_back(&mut state);
+            return Err(error);
+        }
         let guard = match self.start_guard(config.guard_seconds, mode, server, &mut state) {
             Ok(guard) => guard,
             Err(error) => {
                 // Without its guard, a configuration that breaks the system could not be undone.
                 self.log.error(format!("the guard did not start: {error}; restoring the original documents"));
-                Engine::detach_documents(&mut self.log);
-                state.applied = false;
-                state.documents.clear();
-                state.save(&self.store.state_path())?;
+                self.roll_back(&mut state);
                 return Err(error);
             }
         };
@@ -467,6 +469,20 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    /// Undoes an application that failed before it could be guarded: the original documents are
+    /// mounted again, a guard that was started is stopped, and the state says nothing is applied.
+    /// A failure to save that state is logged; the failure that led here is what is reported.
+    pub fn roll_back(&mut self, state: &mut State) {
+        Engine::detach_documents(&mut self.log);
+        Guard::stop(state, &self.store);
+        state.guard = GuardState::Idle;
+        state.applied = false;
+        state.documents.clear();
+        if let Err(error) = state.save(&self.store.state_path()) {
+            self.log.error(format!("the state could not be saved after restoring the original documents: {error}"));
+        }
     }
 
     /// Replaces the documents of an earlier generation with the generated ones.
@@ -683,6 +699,10 @@ impl Engine {
         if let GuardState::Watching { .. } = state.guard {
             state.guard = GuardState::Idle;
         }
+        // Saved before zygote restarts: the restart ends the caller's framework, and this
+        // process may not get to save later. A stopped guard that stayed recorded as watching
+        // would be taken for a crash at the next boot, which then refuses to apply.
+        state.save(&self.store.state_path())?;
         let previous = Guard::system_server().map(|server| server.pid);
         self.log.info("restarting zygote");
         let restart = SystemProperty::set("ctl.restart", "zygote").map_err(|error| DropletError::io("restart zygote", error));
@@ -690,13 +710,21 @@ impl Engine {
         let guard = match (&restart, previous) {
             (Ok(()), Some(previous)) if guard_seconds > 0 && state.applied => {
                 let target = GuardTarget::After(previous);
-                let guard = Guard::spawn(&self.store, guard_seconds, target)?;
-                state.guard = GuardState::Watching { guard, until: Log::now() + Guard::longest(guard_seconds, target) };
-                Some(guard)
+                match Guard::spawn(&self.store, guard_seconds, target) {
+                    Ok(guard) => {
+                        state.guard = GuardState::Watching { guard, until: Log::now() + Guard::longest(guard_seconds, target) };
+                        state.save(&self.store.state_path())?;
+                        Some(guard)
+                    }
+                    Err(error) => {
+                        // Zygote restarts in any case; the restart goes on without a guard.
+                        self.log.warning(format!("the guard did not start: {error}; the restart is not watched"));
+                        None
+                    }
+                }
             }
             _ => None,
         };
-        state.save(&self.store.state_path())?;
         restart?;
         Ok(guard)
     }
